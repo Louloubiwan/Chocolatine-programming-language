@@ -4,6 +4,7 @@
  */
 
 #include "mpc.h"
+#include <math.h>
 
 #ifdef _WIN32
 
@@ -60,7 +61,7 @@ struct lval {
   int type;
 
   /* Basic */
-  long num;         /* pour LVAL_NUM */
+  float num;         /* pour LVAL_NUM */
   char* err;        /* pour LVAL_ERR */
   char* sym;        /* pour LVAL_SYM */
 
@@ -313,6 +314,18 @@ void lval_print_expr(lval* v, char open, char close) {
   putchar(close);
 }
 
+
+/* int si nombre entiers, float si nombre décimal (utilise la bibliotheque math.h)*/
+void lval_print_num(lval* v) {
+  if (v->type == LVAL_NUM) {
+    if (fabsf(v->num - roundf(v->num)) < 1e-6f) {
+      printf("%d", (int)roundf(v->num));
+    } else {
+      printf("%g", v->num);
+    }
+  }
+}
+
 /* Affichage en fonction du type */
 void lval_print(lval* v) {
   if (v->type == LVAL_SEXPR) {
@@ -355,7 +368,7 @@ void lval_print(lval* v) {
       putchar(' '); lval_print(v->body); putchar(')');
     }
     break;
-    case LVAL_NUM:   printf("%li", v->num); break;
+    case LVAL_NUM:   lval_print_num(v); break; // ça va aller check si c'est int ou float
     case LVAL_ERR:   printf("Error: %s", v->err); break;
     case LVAL_SYM:   printf("%s", v->sym); break;
     case LVAL_SEXPR: lval_print_expr(v, '(', ')'); break;
@@ -365,16 +378,16 @@ void lval_print(lval* v) {
 
 void lval_println(lval* v) { lval_print(v); putchar('\n'); }
 
-/* Nom lisible d'un type (utile pour messages d'erreur) */
+// Nom lisible d'un type (utile pour messages d'erreur)
 char* ltype_name(int t) {
   switch(t) {
-    case LVAL_FUN: return "Function";
-    case LVAL_NUM: return "Number";
-    case LVAL_ERR: return "Error";
-    case LVAL_SYM: return "Symbol";
+    case LVAL_FUN: return "Fonction";
+    case LVAL_NUM: return "Nombre";
+    case LVAL_ERR: return "Erreur";
+    case LVAL_SYM: return "Symbole";
     case LVAL_SEXPR: return "S-Expression";
     case LVAL_QEXPR: return "Q-Expression";
-    default: return "Unknown";
+    default: return "Inconnu";
   }
 }
 
@@ -385,10 +398,10 @@ char* ltype_name(int t) {
 lenv* lenv_new(void) { // crée un nouvel environnement vide
   lenv* e = malloc(sizeof(lenv)); //  alloue mémoire
   e->par = NULL; // pas de parent par défaut
-  e->count = 0; // pas d'entrées
-  e->syms = NULL; // pas de symboles
-  e->vals = NULL; // pas de valeurs
-  return e; // retourne l'environnement créé
+  e->count = 0; // pas d'entrés
+  e->syms = NULL; // pas de symbole
+  e->vals = NULL; // pas de valeur
+  return e; // return l'environnement créé
 }
 
 /* Libère l'environnement et toutes les valeurs stockées */
@@ -771,7 +784,7 @@ void lenv_def(lenv* e, lval* k, lval* v) {
 /* Enregistre tous les builtins standard */
 void lenv_add_builtins(lenv* e) {
   /* Fonctions de gestion de variables */
-  lenv_add_builtin(e, "def", builtin_def);
+  lenv_add_builtin(e, "fonction", builtin_def);
   lenv_add_builtin(e, "=",   builtin_put);
 
   
@@ -1026,7 +1039,9 @@ int main(int argc, char** argv) {
     if (mpc_parse("<stdin>", preprocessed, Lispy, &r)) {
       /* Lire l'AST, évaluer avec l'environnement, afficher et libérer */
       lval* x = lval_eval(e, lval_read(r.output));
+      
       lval_println(x);
+      
       lval_del(x);
       mpc_ast_delete(r.output);
     } else {    

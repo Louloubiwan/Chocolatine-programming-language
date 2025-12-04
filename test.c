@@ -1,4 +1,9 @@
 #include "mpc.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+
 
 #ifdef _WIN32
 
@@ -21,7 +26,7 @@ void add_history(char* unused) {}
 #endif
 
 /* Use operator string to see which operation to perform */
-long eval_op(long x, char* op, long y) {
+float eval_op(float x, char* op, float y) {
   if (strcmp(op, "+") == 0) { return x + y; }
   if (strcmp(op, "-") == 0) { return x - y; }
   if (strcmp(op, "*") == 0) { return x * y; }
@@ -31,18 +36,25 @@ long eval_op(long x, char* op, long y) {
   return 0;
 }
 
-long eval(mpc_ast_t* t) {
+/*void float_to_int(float x, int output) {
+
+  
+
+  output = (int)x;
+} */
+
+float eval(mpc_ast_t* t) {
   
   /* If tagged as number return it directly. */ 
   if (strstr(t->tag, "number")) {
-    return atoi(t->contents);
+    return strtof(t->contents, NULL);
   }
   
   /* The operator is always second child. */
   char* op = t->children[2]->contents;
   
   /* We store the third child in `x` */
-  long x = eval(t->children[1]);
+  float x = eval(t->children[1]);
   
   /* Iterate the remaining children and combining. */
   int i = 3;
@@ -83,8 +95,14 @@ int main(int argc, char** argv) {
     mpc_result_t r;
     if (mpc_parse("<stdin>", input, Lispy, &r)) {
       
-      long result = eval(r.output);
-      printf("%li\n", result);
+       float result = eval(r.output);
+      /* If result is very close to an integer, print as int; else print as float */
+      if (fabsf(result - roundf(result)) < 1e-6f) {
+        printf("%d\n", (int)roundf(result));
+      } else {
+        printf("%g\n", result);
+      }
+      
       mpc_ast_delete(r.output);
       
     } else {    
