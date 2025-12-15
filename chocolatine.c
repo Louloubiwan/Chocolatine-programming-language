@@ -83,6 +83,7 @@ lenv* lenv_copy(lenv* e);
 void lenv_def(lenv* e, lval* k, lval* v);
 lval* lval_fun(lbuiltin func);
 lval* builtin_var(lenv* e, lval* a, char* func);
+lval* lval_call(lenv* e, lval* f, lval* a);
 /* ===== FIN DÉCLARATIONS ANTICIPÉES ===== */
 
 /* Constructeurs simples pour chaque type lval */
@@ -369,7 +370,7 @@ void lval_print(lval* v) {
     }
     break;
     case LVAL_NUM:   lval_print_num(v); break; // ça va aller check si c'est int ou float
-    case LVAL_ERR:   printf("Error: %s", v->err); break;
+    case LVAL_ERR:   printf("Erreur: %s", v->err); break;
     case LVAL_SYM:   printf("%s", v->sym); break;
     case LVAL_SEXPR: lval_print_expr(v, '(', ')'); break;
     case LVAL_QEXPR: lval_print_expr(v, '{', '}'); break;
@@ -395,6 +396,46 @@ char* ltype_name(int t) {
  *
  * Implémentation simple par tableaux dynamiques (grow with realloc).
  */
+
+float lval_eq(lval* x, lval* y) {
+
+  /* Different Types are always unequal */
+  if (x->type != y->type) { return 0; }
+
+  /* Compare Based upon type */
+  switch (x->type) {
+    /* Compare Number Value */
+    case LVAL_NUM: return (x->num == y->num);
+
+    /* Compare String Values */
+    case LVAL_ERR: return (strcmp(x->err, y->err) == 0);
+    case LVAL_SYM: return (strcmp(x->sym, y->sym) == 0);
+
+    /* If builtin compare, otherwise compare formals and body */
+    case LVAL_FUN:
+      if (x->builtin || y->builtin) {
+        return x->builtin == y->builtin;
+      } else {
+        return lval_eq(x->formals, y->formals)
+          && lval_eq(x->body, y->body);
+      }
+
+    /* If list compare every individual element */
+    case LVAL_QEXPR:
+    case LVAL_SEXPR:
+      if (x->count != y->count) { return 0; }
+      for (int i = 0; i < x->count; i++) {
+        /* If any element not equal then whole list not equal */
+        if (!lval_eq(x->cell[i], y->cell[i])) { return 0; }
+      }
+      /* Otherwise lists must be equal */
+      return 1;
+    break;
+  }
+  return 0;
+}
+
+
 lenv* lenv_new(void) { // crée un nouvel environnement vide
   lenv* e = malloc(sizeof(lenv)); //  alloue mémoire
   e->par = NULL; // pas de parent par défaut
@@ -533,7 +574,7 @@ lval* lval_eval(lenv* e, lval* v) {
 
 // Définit des variables dans l'environnement global
 lval* builtin_def(lenv* e, lval* a) {
-  return builtin_var(e, a, "def");
+  return builtin_var(e, a, "fonction");
 }
 
 // Définit des variables dans l'environnement local
@@ -602,6 +643,105 @@ lval* builtin_join(lenv* e, lval* a) {
   return x;
   
 }
+
+// Comparaison d'égalité
+
+lval* builtin_ord(lenv* e, lval* a, char* op) {
+  LASSERT_NUM(op, a, 2);
+  LASSERT_TYPE(op, a, 0, LVAL_NUM);
+  LASSERT_TYPE(op, a, 1, LVAL_NUM);
+
+  int r;
+  if (strcmp(op, ">")  == 0) {
+    r = (a->cell[0]->num >  a->cell[1]->num);
+  }
+  if (strcmp(op, "<")  == 0) {
+    r = (a->cell[0]->num <  a->cell[1]->num);
+  }
+  if (strcmp(op, ">=") == 0) {
+    r = (a->cell[0]->num >= a->cell[1]->num);
+  }
+  if (strcmp(op, "<=") == 0) {
+    r = (a->cell[0]->num <= a->cell[1]->num);
+  }
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_cmp(lenv* e, lval* a, char* op) {
+  LASSERT_NUM(op, a, 2);
+  float r;
+  if (strcmp(op, "==") == 0) {
+    r =  lval_eq(a->cell[0], a->cell[1]);
+  }
+  if (strcmp(op, "!=") == 0) {
+    r = !lval_eq(a->cell[0], a->cell[1]);
+  }
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_eq(lenv* e, lval* a) {
+  return builtin_cmp(e, a, "==");
+}
+
+lval* builtin_ne(lenv* e, lval* a) {
+  return builtin_cmp(e, a, "!=");
+}
+
+// Comparaison arithmétique
+lval* builtin_gt(lenv* e, lval* a) {
+  return builtin_ord(e, a, ">");
+}
+lval* builtin_lt(lenv* e, lval* a) {
+  return builtin_ord(e, a, "<");
+}
+lval* builtin_ge(lenv* e, lval* a) {
+  return builtin_ord(e, a, ">=");
+}
+lval* builtin_le(lenv* e, lval* a) {
+  return builtin_ord(e, a, "<=");
+}
+// if : évalue une des deux expressions
+lval* builtin_if(lenv* e, lval* a) {
+  LASSERT_NUM("if", a, 3);
+  LASSERT_TYPE("if", a, 0, LVAL_NUM);
+  LASSERT_TYPE("if", a, 1, LVAL_QEXPR);
+  LASSERT_TYPE("if", a, 2, LVAL_QEXPR);
+ 
+
+  /* Utilise LASSERT_TYPE(...,LVAL_FUN) si il y'a une fonction dans la condition*/
+  /* exemple : if x > 2 then blablabla  x est considéré comme fonction */ 
+  if (a->cell[0]->type == LVAL_FUN) {
+    lval* result = lval_call(e, a->cell[0], lval_sexpr());
+    lval_del(a->cell[0]);
+    a->cell[0] = result;
+    if (a->cell[0]->type == LVAL_ERR) {
+      lval* err = a->cell[0];
+      lval_del(a);
+      return err;
+    }
+    LASSERT_TYPE("if", a, 0, LVAL_NUM);
+  }
+
+  /* Mark Both Expressions as evaluable */
+  lval* x;
+  a->cell[1]->type = LVAL_SEXPR;
+  a->cell[2]->type = LVAL_SEXPR;
+
+  if (a->cell[0]->num) {
+    /* If condition is true evaluate first expression */
+    x = lval_eval(e, lval_pop(a, 1));
+  } else {
+    /* Otherwise evaluate second expression */
+    x = lval_eval(e, lval_pop(a, 2));
+  }
+
+  /* Delete argument list and return */
+  lval_del(a);
+  return x;
+}
+
 
 /* builtin_op : opérateurs arithmétiques génériques (+ - * /)
  * Opère sur une liste de nombres et gère la division par zéro.
@@ -752,8 +892,8 @@ lval* builtin_var(lenv* e, lval* a, char* func) {
     "Got %i, Expected %i.", func, syms->count, a->count-1);
 
   for (int i = 0; i < syms->count; i++) {
-    /* If 'def' define in globally. If 'put' define in locally */
-    if (strcmp(func, "def") == 0) {
+    /* If 'fonction' define in globally. If 'put' define in locally */
+    if (strcmp(func, "fonction") == 0) {
       lenv_def(e, syms->cell[i], a->cell[i+1]);
     }
 
@@ -794,6 +934,15 @@ void lenv_add_builtins(lenv* e) {
   lenv_add_builtin(e, "tail", builtin_tail);
   lenv_add_builtin(e, "eval", builtin_eval);
   lenv_add_builtin(e, "join", builtin_join);
+
+    /* Comparison Functions */
+  lenv_add_builtin(e, "si", builtin_if);
+  lenv_add_builtin(e, "==", builtin_eq);
+  lenv_add_builtin(e, "!=", builtin_ne);
+  lenv_add_builtin(e, ">",  builtin_gt);
+  lenv_add_builtin(e, "<",  builtin_lt);
+  lenv_add_builtin(e, ">=", builtin_ge);
+  lenv_add_builtin(e, "<=", builtin_le);
   
   /* Fonctions mathématiques */
   lenv_add_builtin(e, "+", builtin_add);
@@ -888,9 +1037,9 @@ lval* lval_read(mpc_ast_t* t) {
 /* Prétraitement : conversion d'une expression infixée simple en notation préfixée Lisp */
 char* preprocess_infix(const char* input) {
   /*
-   * Ne convertir en préfixe que les expressions infix arithmétiques
-   * simples commençant par un nombre ou un symbole d'opérande valide,
-   * et ayant un opérateur en position 1.
+   * Convertit :
+   * 1. Les expressions infix arithmétiques : x + y -> (+ x y)
+   * 2. Les expressions if-then-else : if cond then expr else expr
    */
 
   struct {
@@ -898,19 +1047,129 @@ char* preprocess_infix(const char* input) {
     const char* symbol;
   } op_map[] = {
     {"plus", "+"}, {"moin", "-"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"diviser", "/"}, {"diviser par", "/"},
-    {"+", "+"}, {"-", "-"}, {"*", "*"}, {"*", "*"}, {"/", "/"}, {"/", "/"},
+    {"+", "+"}, {"-", "-"}, {"*", "*"}, {"/", "/"},
+    {">", ">"}, {"<", "<"}, {">=", ">="}, {"<=", "<="}, {"==", "=="}, {"!=", "!="},
   };
 
-  /* Copie de l'entrée pour tokenisation */
+  /* Check for if-then-else pattern at character level */
+  if (strncmp(input, "si ", 3) == 0) {
+    const char* then_pos = strstr(input, " alors ");
+    const char* else_pos = strstr(input, " sinon ");
+    
+    if (then_pos != NULL) {
+      /* Extract condition */
+      int cond_len = then_pos - input - 3;
+      char* condition = malloc(cond_len + 1);
+      if (condition) {
+        strncpy(condition, input + 3, cond_len);
+        condition[cond_len] = '\0';
+
+        /* Start of then branch */
+        const char* then_content = then_pos + 6;
+        while (*then_content && isspace((unsigned char)*then_content)) then_content++;
+        
+        char* then_expr = malloc(4096);
+        char* else_expr = malloc(4096);
+        
+        if (then_expr && else_expr) {
+          then_expr[0] = '\0';
+          else_expr[0] = '\0';
+          
+          int then_len = 0;
+          
+          /* Extract then branch (handle both {expr} and bare expr) */
+          if (*then_content == '{') {
+            int brace_count = 1;
+            const char* ptr = then_content + 1;
+            while (*ptr && brace_count > 0) {
+              if (*ptr == '{') brace_count++;
+              else if (*ptr == '}') brace_count--;
+              if (brace_count > 0) {
+                then_expr[then_len++] = *ptr;
+              }
+              ptr++;
+            }
+            then_expr[then_len] = '\0';
+            
+            /* Check for else after the closing brace */
+            if (else_pos && else_pos >= (ptr - 1)) {
+              const char* else_content = else_pos + 6;
+              while (*else_content && isspace((unsigned char)*else_content)) else_content++;
+              
+              int else_len = 0;
+              if (*else_content == '{') {
+                int brace_count = 1;
+                const char* eptr = else_content + 1;
+                while (*eptr && brace_count > 0) {
+                  if (*eptr == '{') brace_count++;
+                  else if (*eptr == '}') brace_count--;
+                  if (brace_count > 0) {
+                    else_expr[else_len++] = *eptr;
+                  }
+                  eptr++;
+                }
+                else_expr[else_len] = '\0';
+              } else {
+                strcpy(else_expr, else_content);
+              }
+            }
+          } else {
+            /* No braces, scan until 'else' or end */
+            if (else_pos) {
+              then_len = else_pos - then_content;
+              strncpy(then_expr, then_content, then_len);
+              then_expr[then_len] = '\0';
+              /* Trim trailing whitespace */
+              while (then_len > 0 && isspace((unsigned char)then_expr[then_len-1])) {
+                then_expr[--then_len] = '\0';
+              }
+              
+              const char* else_content = else_pos + 6;
+              while (*else_content && isspace((unsigned char)*else_content)) else_content++;
+              strcpy(else_expr, else_content);
+            } else {
+              /* No else, just take rest as then */
+              strcpy(then_expr, then_content);
+            }
+          }
+
+          /* Recursively preprocess parts */
+          char* proc_cond = preprocess_infix(condition);
+          char* proc_then = preprocess_infix(then_expr);
+          char* proc_else = preprocess_infix(else_expr);
+
+          char* result = malloc(8192);
+          if (result) {
+            snprintf(result, 8192, "(si %s {%s} {%s})",
+                     proc_cond, proc_then, proc_else);
+            
+            free(condition);
+            free(then_expr);
+            free(else_expr);
+            free(proc_cond);
+            free(proc_then);
+            free(proc_else);
+            return result;
+          }
+          
+          free(then_expr);
+          free(else_expr);
+        }
+        free(condition);
+      }
+    }
+  }
+
+  /* Tokenize for arithmetic infix */
   char* input_copy = malloc(strlen(input) + 1);
   if (!input_copy) return NULL;
   strcpy(input_copy, input);
-
+  
   char** tokens = NULL;
   int tokens_count = 0;
-
   char* saveptr = NULL;
   char* token = strtok_r(input_copy, " ", &saveptr);
+  
   while (token != NULL) {
     char** tmp = realloc(tokens, sizeof(char*) * (tokens_count + 1));
     if (!tmp) { free(tokens); free(input_copy); return NULL; }
@@ -925,7 +1184,6 @@ char* preprocess_infix(const char* input) {
     return strdup("");
   }
 
-  /* Si pas assez de tokens, retourner original */
   if (tokens_count < 3) {
     char* out = strdup(input);
     free(tokens);
@@ -933,32 +1191,18 @@ char* preprocess_infix(const char* input) {
     return out;
   }
 
-  /* Helper : vérifier si un token est un opérateur connu */
-
   int is_op = 0;
   for (size_t m = 0; m < sizeof(op_map)/sizeof(op_map[0]); m++) {
     if (strcmp(op_map[m].word, tokens[1]) == 0) { is_op = 1; break; }
   }
 
-  /* Helper : identifier si token look like a "starting operand" (nombre ou symbole simple).
-     Nous n'appliquons la conversion que si le premier token n'est pas un nom de builtin
-     (ex: "head", "def") — heuristique : s'il commence par une lettre et n'est pas un chiffre
-     on considère que ce n'est pas une expression infix à convertir. */
-  int is_start_operand = 0;
-  if (tokens[0][0] == '-' && isdigit((unsigned char)tokens[0][1])) is_start_operand = 1;
-  if (isdigit((unsigned char)tokens[0][0])) is_start_operand = 1;
-  /* autoriser parenthèse ou '{' comme début aussi */
-  if (tokens[0][0] == '(' || tokens[0][0] == '{') is_start_operand = 1;
-
-  /* Si ce n'est pas une forme infix arithmétique, retourne original */
-  if (!is_op || !is_start_operand) {
+  if (!is_op) {
     char* out = strdup(input);
     free(tokens);
     free(input_copy);
     return out;
   }
 
-  /* Construction gauche-associative du préfixe */
   char* left = malloc(strlen(tokens[0]) + 1);
   strcpy(left, tokens[0]);
 
