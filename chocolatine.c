@@ -968,7 +968,7 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
   }
   
   /* Expression vide -> retourne telle quelle */
-  if (v->count == 0) { return v; }  
+  if (v->count == 0) { return lval_err("rien est execute"); }  
   /* Expression unique -> retourne l'unique élément */
   if (v->count == 1) { return lval_take(v, 0); }
   
@@ -983,13 +983,14 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
       "Got %s, Expected %s.",
       ltype_name(f->type), ltype_name(LVAL_FUN));
     lval_del(f); lval_del(v);
-    return err;
+    return err; 
   }
 
   /* Appelle la fonction (qui consomme la liste v) et renvoie le résultat */
   lval* result = lval_call(e, f, v);
   lval_del(f);
   return result;
+  printf("test");
 }
 
 lval* lval_read_num(mpc_ast_t* t);
@@ -1048,6 +1049,7 @@ char* preprocess_infix(const char* input) {
   } op_map[] = {
     {"plus", "+"}, {"moin", "-"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"diviser", "/"}, {"diviser par", "/"},
     {"+", "+"}, {"-", "-"}, {"*", "*"}, {"/", "/"},
+    {"est superieur a", ">"}, {"est inferieur a", "<"}, {"est superieur ou egal a", ">="}, {"est inferieur ou egal a", "<="}, {"est egale a", "=="}, {"est different de", "!="},
     {">", ">"}, {"<", "<"}, {">=", ">="}, {"<=", "<="}, {"==", "=="}, {"!=", "!="},
   };
 
@@ -1160,10 +1162,45 @@ char* preprocess_infix(const char* input) {
     }
   }
 
+  /* Remplacer les terme qui ont des espaces avec des underscore _ */
+  char* normalized = malloc(strlen(input) * 2 + 1);
+  if (!normalized) return NULL;
+  
+  strcpy(normalized, input);
+  /* replace "multiplier par" with "multiplier_par", "diviser par" with "diviser_par" */
+  char* search_replace[] = {
+    "multiplier par", "multiplier_par",
+    "diviser par", "diviser_par",
+    "est superieur a", "est_superieur_a",
+    "est inferieur a", "est_inferieur_a",
+    "est superieur ou egal a", "est_superieur_ou_egal_a",
+    "est inferieur ou egal a", "est_inferieur_ou_egal_a",
+    "est egale a", "est_egale_a",
+    "est different de", "est_different_de",
+    NULL, NULL
+  };
+  
+  for (int i = 0; search_replace[i] != NULL; i += 2) {
+    char* pos = normalized;
+    while ((pos = strstr(pos, search_replace[i])) != NULL) {
+      int search_len = strlen(search_replace[i]);
+      int replace_len = strlen(search_replace[i+1]);
+      if (search_len == replace_len) {
+        memcpy(pos, search_replace[i+1], replace_len);
+        pos += replace_len;
+      } else {
+        /* If lengths differ, we'd need memmove - simpler to just mark it differently */
+        /* For now, underscore has same length as space so it works */
+        pos[search_len/2] = '_';
+        pos += search_len;
+      }
+    }
+  }
+
   /* Tokenize for arithmetic infix */
-  char* input_copy = malloc(strlen(input) + 1);
-  if (!input_copy) return NULL;
-  strcpy(input_copy, input);
+  char* input_copy = malloc(strlen(normalized) + 1);
+  if (!input_copy) { free(normalized); return NULL; }
+  strcpy(input_copy, normalized);
   
   char** tokens = NULL;
   int tokens_count = 0;
@@ -1172,7 +1209,7 @@ char* preprocess_infix(const char* input) {
   
   while (token != NULL) {
     char** tmp = realloc(tokens, sizeof(char*) * (tokens_count + 1));
-    if (!tmp) { free(tokens); free(input_copy); return NULL; }
+    if (!tmp) { free(tokens); free(input_copy); free(normalized); return NULL; }
     tokens = tmp;
     tokens[tokens_count++] = token;
     token = strtok_r(NULL, " ", &saveptr);
@@ -1180,7 +1217,8 @@ char* preprocess_infix(const char* input) {
 
   if (tokens_count == 0) {
     free(tokens);
-    free(input_copy);
+    free(input_copy); 
+    free(normalized);
     return strdup("");
   }
 
@@ -1188,18 +1226,25 @@ char* preprocess_infix(const char* input) {
     char* out = strdup(input);
     free(tokens);
     free(input_copy);
+    free(normalized);
     return out;
   }
 
   int is_op = 0;
   for (size_t m = 0; m < sizeof(op_map)/sizeof(op_map[0]); m++) {
-    if (strcmp(op_map[m].word, tokens[1]) == 0) { is_op = 1; break; }
+    /* Replace underscores back to spaces for comparison */
+    char op_name[256];
+    strcpy(op_name, tokens[1]);
+    for (char* p = op_name; *p; p++) if (*p == '_') *p = ' ';
+    
+    if (strcmp(op_map[m].word, op_name) == 0) { is_op = 1; break; }
   }
 
   if (!is_op) {
     char* out = strdup(input);
     free(tokens);
     free(input_copy);
+    free(normalized);
     return out;
   }
 
@@ -1207,7 +1252,11 @@ char* preprocess_infix(const char* input) {
   strcpy(left, tokens[0]);
 
   for (int i = 1; i + 1 < tokens_count; i += 2) {
-    const char* op = tokens[i];
+    char op_name[256];
+    strcpy(op_name, tokens[i]);
+    for (char* p = op_name; *p; p++) if (*p == '_') *p = ' ';
+    
+    const char* op = op_name;
     const char* op_sym = op;
     for (size_t m = 0; m < sizeof(op_map)/sizeof(op_map[0]); m++) {
       if (strcmp(op_map[m].word, op) == 0) { op_sym = op_map[m].symbol; break; }
@@ -1218,7 +1267,7 @@ char* preprocess_infix(const char* input) {
 
     int size = (int)(strlen(op_sym) + strlen(left) + strlen(right) + 6);
     char* combined = malloc(size);
-    if (!combined) { free(left); free(right); free(tokens); free(input_copy); return NULL; }
+    if (!combined) { free(left); free(right); free(tokens); free(input_copy); free(normalized); return NULL; }
 
     snprintf(combined, size, "(%s %s %s)", op_sym, left, right);
 
@@ -1229,6 +1278,7 @@ char* preprocess_infix(const char* input) {
 
   free(tokens);
   free(input_copy);
+  free(normalized);
   return left;
 }
 
@@ -1288,6 +1338,7 @@ int main(int argc, char** argv) {
       
       lval_del(x);
       mpc_ast_delete(r.output);
+      
     } else {    
       /* Afficher l'erreur de parsing (mpc) et nettoyer */
       mpc_err_print(r.error);
