@@ -29,6 +29,7 @@ void add_history(char* unused) {}
 #include <editline/readline.h>
 #include <editline/history.h>
 #endif
+#include <stdbool.h>
 
 /* Déclarations anticipées */
 
@@ -40,6 +41,7 @@ typedef struct lenv lenv;
 /* Fonction principale : initialise le parser, l'environnement, lance la boucle REPL */
 /* Parsers globaux pour l'analyse */
 static mpc_parser_t* Number;
+static mpc_parser_t* Bool;
 static mpc_parser_t* Symbol;
 static mpc_parser_t* String;
 static mpc_parser_t* Comment;
@@ -59,6 +61,7 @@ enum {
   LVAL_SYM,    /* Symbole */
   LVAL_FUN,    /* Fonction */
   LVAL_STR,    /* Chaîne de caractères */
+  LVAL_BOOL,   /* Booléen */
   LVAL_SEXPR,  /* S-expression (evaluated list) */
   LVAL_QEXPR   /* Q-expression (quoted list) */
 };
@@ -80,6 +83,7 @@ struct lval {
   char* err;        /* pour LVAL_ERR */
   char* sym;        /* pour LVAL_SYM */
   char* str;        /* pour LVAL_STR */
+  bool* bools;       /* pour LVAL_BOOL */
 
   /* Fonction */
   lbuiltin builtin; /* pour LVAL_FUN (fonction native) */
@@ -118,6 +122,14 @@ lval* lval_str(char* s) {
   v->type = LVAL_STR;
   v->str = malloc(strlen(s) + 1);
   strcpy(v->str, s);
+  return v;
+}
+
+lval* lval_bool(bool b) {
+  lval* v = malloc(sizeof(lval));
+  v->type = LVAL_BOOL;
+  v->bools = malloc(sizeof(bool));
+  *(v->bools) = b;
   return v;
 }
 
@@ -212,6 +224,8 @@ void lval_del(lval* v) {
     case LVAL_ERR: free(v->err); break;
     case LVAL_SYM: free(v->sym); break;
     case LVAL_STR: free(v->str); break;
+    case LVAL_BOOL: free(v->bools); break;
+
     case LVAL_FUN:
     if (!v->builtin) {
       lenv_del(v->env);
@@ -256,6 +270,11 @@ lval* lval_copy(lval* v) {
     case LVAL_STR: 
       x->str = malloc(strlen(v->str) + 1);
       strcpy(x->str, v->str); break;
+
+    case LVAL_BOOL:
+      x->bools = malloc(sizeof(bool));
+      *(x->bools) = *(v->bools);
+      break;
      
     case LVAL_FUN:
       if (v->builtin) {
@@ -419,6 +438,7 @@ void lval_print(lval* v) {
     case LVAL_SEXPR: lval_print_expr(v, '(', ')'); break;
     case LVAL_QEXPR: lval_print_expr(v, '{', '}'); break;   
     case LVAL_STR:  lval_print_str(v); break;
+    case LVAL_BOOL: printf("%s", *(v->bools) ? "vrai" : "faux"); break;
 
   }
 }
@@ -433,6 +453,7 @@ char* ltype_name(int t) {
     case LVAL_ERR: return "Erreur";
     case LVAL_SYM: return "Symbole";
     case LVAL_STR: return "Caractere";
+    case LVAL_BOOL: return "Booléen";
     case LVAL_SEXPR: return "S-Expression";
     case LVAL_QEXPR: return "Q-Expression";
     default: return "Inconnu";
@@ -455,6 +476,8 @@ float lval_eq(lval* x, lval* y) {
     case LVAL_NUM: return (x->num == y->num);
 
     case LVAL_STR: return (strcmp(x->str, y->str) == 0);
+
+    case LVAL_BOOL: return (*(x->bools) == *(y->bools));
 
     /* Compare String Values */
     case LVAL_ERR: return (strcmp(x->err, y->err) == 0);
@@ -559,6 +582,20 @@ void lenv_put(lenv* e, lval* k, lval* v) {
   strcpy(e->syms[e->count-1], k->sym);
 }
 
+// ---------------------------------------------------------------------------//
+// FIN DES DÉFINITIONS DE LENV ET LVAL (FONCTIONS COEUR) //
+
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------//
 /* Fonctions intégrées (Builtins) */
 
 /* Macros d'assertions pour vérifier les arguments passés aux builtins.
@@ -792,33 +829,24 @@ lval* builtin_ord(lenv* e, lval* a, char* op) {
   LASSERT_TYPE(op, a, 1, LVAL_NUM);
 
   int r;
-  if (strcmp(op, ">")  == 0) {
-    r = (a->cell[0]->num >  a->cell[1]->num);
-  }
-  if (strcmp(op, "<")  == 0) {
-    r = (a->cell[0]->num <  a->cell[1]->num);
-  }
-  if (strcmp(op, ">=") == 0) {
-    r = (a->cell[0]->num >= a->cell[1]->num);
-  }
-  if (strcmp(op, "<=") == 0) {
-    r = (a->cell[0]->num <= a->cell[1]->num);
-  }
+  if (strcmp(op, ">")  == 0) r = (a->cell[0]->num >  a->cell[1]->num);
+  else if (strcmp(op, "<")  == 0) r = (a->cell[0]->num <  a->cell[1]->num);
+  else if (strcmp(op, ">=") == 0) r = (a->cell[0]->num >= a->cell[1]->num);
+  else if (strcmp(op, "<=") == 0) r = (a->cell[0]->num <= a->cell[1]->num);
+  
   lval_del(a);
-  return lval_num(r);
+  return lval_bool(r);
 }
 
 lval* builtin_cmp(lenv* e, lval* a, char* op) {
   LASSERT_NUM(op, a, 2);
   float r;
-  if (strcmp(op, "==") == 0) {
-    r =  lval_eq(a->cell[0], a->cell[1]);
-  }
-  if (strcmp(op, "!=") == 0) {
-    r = !lval_eq(a->cell[0], a->cell[1]);
-  }
+  if (strcmp(op, "==") == 0) r = lval_eq(a->cell[0], a->cell[1]);
+  else if (strcmp(op, "!=") == 0) r = !lval_eq(a->cell[0], a->cell[1]);
+  else r = 0;
+  
   lval_del(a);
-  return lval_num(r);
+  return lval_bool(r);
 }
 
 lval* builtin_eq(lenv* e, lval* a) {
@@ -842,18 +870,56 @@ lval* builtin_ge(lenv* e, lval* a) {
 lval* builtin_le(lenv* e, lval* a) {
   return builtin_ord(e, a, "<=");
 }
-// if : évalue une des deux expressions
-lval* builtin_if(lenv* e, lval* a) {
-  LASSERT_NUM("if", a, 3);
-  LASSERT_TYPE("if", a, 0, LVAL_NUM);
-  LASSERT_TYPE("if", a, 1, LVAL_QEXPR);
-  LASSERT_TYPE("if", a, 2, LVAL_QEXPR);
- 
 
-  /* Utilise LASSERT_TYPE(...,LVAL_FUN) si il y'a une fonction dans la condition*/
-  /* exemple : if x > 2 then blablabla  x est considéré comme fonction */ 
-  if (a->cell[0]->type == LVAL_FUN) {
-    lval* result = lval_call(e, a->cell[0], lval_sexpr());
+/* Helper: check if a value is truthy (non-zero number or true boolean) */
+static int is_truthy(lval* v) {
+  if (v->type == LVAL_NUM) return v->num != 0;
+  if (v->type == LVAL_BOOL) return *(v->bools);
+  return 0;
+}
+
+/* Logical AND: returns true si tous les arguments sont vrais */
+lval* builtin_and(lenv* e, lval* a) {
+  for (int i = 0; i < a->count; i++) {
+    if (a->cell[i]->type != LVAL_NUM && a->cell[i]->type != LVAL_BOOL) {
+      LASSERT_TYPE("et", a, i, LVAL_NUM);
+    }
+    if (!is_truthy(a->cell[i])) { // si un argument est faux
+      lval_del(a);
+      return lval_bool(0);
+    }
+  }
+  lval_del(a);
+  return lval_bool(1);
+}
+
+/* Logical ou: returns si un argument est vrais*/
+lval* builtin_or(lenv* e, lval* a) {
+  for (int i = 0; i < a->count; i++) {
+    if (a->cell[i]->type != LVAL_NUM && a->cell[i]->type != LVAL_BOOL) {
+      LASSERT_TYPE("ou", a, i, LVAL_NUM);
+    }
+    if (is_truthy(a->cell[i])) { // si un arguments est vrai
+      lval_del(a);
+      return lval_bool(1);
+    }
+  }
+  lval_del(a);
+  return lval_bool(0);
+}
+
+// if : évalue une des deux expressions en fonction d'une condition
+lval* builtin_if(lenv* e, lval* a) {
+  LASSERT_NUM("si", a, 3);
+  LASSERT_TYPE("si", a, 1, LVAL_QEXPR);
+  LASSERT_TYPE("si", a, 2, LVAL_QEXPR);
+ 
+  lval* cond = a->cell[0];
+  int is_true = 0;
+  
+  /* Évalue la condition si c'est une fonction */
+  if (cond->type == LVAL_FUN) {
+    lval* result = lval_call(e, cond, lval_sexpr());
     lval_del(a->cell[0]);
     a->cell[0] = result;
     if (a->cell[0]->type == LVAL_ERR) {
@@ -861,25 +927,25 @@ lval* builtin_if(lenv* e, lval* a) {
       lval_del(a);
       return err;
     }
-    LASSERT_TYPE("if", a, 0, LVAL_NUM);
+    cond = a->cell[0];
+  }
+  
+  /* Accepte LVAL_NUM ou LVAL_BOOL */
+  if (cond->type == LVAL_NUM || cond->type == LVAL_BOOL) {
+    is_true = is_truthy(cond);
+  } else {
+    lval* err = lval_err("Condition must be number or boolean, got %s", ltype_name(cond->type));
+    lval_del(a);
+    return err;
   }
 
-  /* Mark Both Expressions as evaluable */
-  lval* x;
+  /* Convertit les branches en S-expressions et évalue */
   a->cell[1]->type = LVAL_SEXPR;
   a->cell[2]->type = LVAL_SEXPR;
 
-  if (a->cell[0]->num) {
-    /* If condition is true evaluate first expression */
-    x = lval_eval(e, lval_pop(a, 1));
-  } else {
-    /* Otherwise evaluate second expression */
-    x = lval_eval(e, lval_pop(a, 2));
-  }
-
-  /* Delete argument list and return */
+  lval* result = lval_eval(e, lval_pop(a, is_true ? 1 : 2));
   lval_del(a);
-  return x;
+  return result;
 }
 
 
@@ -1088,6 +1154,10 @@ void lenv_add_builtins(lenv* e) {
   lenv_add_builtin(e, ">=", builtin_ge);
   lenv_add_builtin(e, "<=", builtin_le);
   
+  /* Logical Functions */
+  lenv_add_builtin(e, "et", builtin_and);
+  lenv_add_builtin(e, "ou", builtin_or);
+  
   /* Fonctions mathématiques */
   lenv_add_builtin(e, "+", builtin_add);
   lenv_add_builtin(e, "-", builtin_sub);
@@ -1134,7 +1204,6 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
   lval* result = lval_call(e, f, v);
   lval_del(f);
   return result;
-  printf("test");
 }
 
 lval* lval_read_num(mpc_ast_t* t);
@@ -1144,7 +1213,7 @@ lval* lval_read_num(mpc_ast_t* t);
  * Fonctions qui transforment l'AST mpc en structures lval.
  */
 
-/* Lecture d'un nombre depuis un noeud AST */
+/* Lecture d'un nombre depuis un noeud mpc_AST */
 lval* lval_read_num(mpc_ast_t* t) {
   errno = 0;
   long x = strtol(t->contents, NULL, 10);
@@ -1169,14 +1238,24 @@ lval* lval_read_str(mpc_ast_t* t) {
 /* Lecture générique d'un noeud AST :
  * - number -> lval_num
  * - symbol -> lval_sym
+ * - bool -> lval_bool
  * - sexpr/qexpr -> construire récursivement
  */
 lval* lval_read(mpc_ast_t* t) {
   
   if (strstr(t->tag, "number")) { return lval_read_num(t); }
+  if (strstr(t->tag, "bool")) { 
+    if (strcmp(t->contents, "vrai") == 0) {
+      return lval_bool(1);
+    } else if (strcmp(t->contents, "faux") == 0) {
+      return lval_bool(0);
+    } else {
+      return lval_err("Invalid boolean value: %s", t->contents);
+    }
+  }
   if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
-  
-  
+  if (strstr(t->tag, "string")) { return lval_read_str(t); }
+
   lval* x = NULL;
   if (strcmp(t->tag, ">") == 0) { x = lval_sexpr(); } 
   if (strstr(t->tag, "sexpr"))  { x = lval_sexpr(); }
@@ -1192,13 +1271,58 @@ lval* lval_read(mpc_ast_t* t) {
     if (strstr(t->children[i]->tag, "comment")) { continue; }
     x = lval_add(x, lval_read(t->children[i]));
   }
-  if (strstr(t->tag, "string")) { return lval_read_str(t); }
   
   return x;
 }
 
+// ---------------------------------------------------------------------------//
+// FIN DES FONCTIONS BUILTIN //
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------//
+/* LES FONCTIONS NECESSAIRES POUR PREPROCESSE_INFIX*/
+
+typedef struct {
+  const char* word;
+  const char* symbol;
+} entree_op;
+
+
+static const char* get_op_sym(const char* name, entree_op *op_map, size_t size) {
+  for (size_t m = 0; m < size; m++) {
+    if (strcmp(op_map[m].word, name) == 0) return op_map[m].symbol; // Si trouvé, retourne le symbole (!=, ==, +, blabla)
+  }
+  return name;
+}
+
+
+static int is_comparison_op(const char* name) {
+  return strcmp(name, "et") != 0 && strcmp(name, "ou") != 0;
+}
+
+static void combine_tokens(char** tok, int* cnt, int idx, const char* op_sym) {
+  int size = strlen(op_sym) + strlen(tok[idx]) + strlen(tok[idx+2]) + 6;
+  char* combined = malloc(size);
+  snprintf(combined, size, "(%s %s %s)", op_sym, tok[idx], tok[idx+2]);
+  free(tok[idx]); free(tok[idx+1]); free(tok[idx+2]);
+  tok[idx] = combined;
+  for (int j = idx + 1; j + 2 < *cnt; j++) tok[j] = tok[j + 2];
+  *cnt -= 2;
+}
+
+
 /* prétraitement : conversion d'une expression infixée simple en notation préfixée Lisp */
 char* preprocess_infix(const char* input) {
+  /* Insert spaces around operators */
+  
   /*
    * Converti :
    * 1. Les expressions d'assignation : money = 10 -> (= {money} 10)
@@ -1233,17 +1357,23 @@ char* preprocess_infix(const char* input) {
     }
   }
 
-  struct {
-    const char* word;
-    const char* symbol;
-  } op_map[] = {
+  /* Support des booléens */
+  if (strcmp(input, "vrai") == 0 || strcmp(input, "Vrai") == 0 || strcmp(input, "vrais") == 0 || strcmp(input, "Vrais") == 0 
+      || strcmp(input, "faux") == 0 || strcmp(input, "Faux") == 0){
+    return strdup(input);
+  }
+
+  entree_op list_caractere[] = {
     {"plus", "+"}, {"moin", "-"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"diviser", "/"}, {"diviser par", "/"},
     {"+", "+"}, {"-", "-"}, {"*", "*"}, {"/", "/"},
-    {"est superieur a", ">"}, {"est inferieur a", "<"}, {"est superieur ou egal a", ">="}, {"est inferieur ou egal a", "<="}, {"est egale a", "=="}, {"est different de", "!="},
+    {"est", "=="}, {"est egale a", "=="}, {"est égale", "=="}, {"sont egale a", "=="}, {"sont egaux a", "=="}, {"sont égaux a", "=="},
+    {"est different de", "!="}, {"n'est pas", "!="}, {"n'est pas egale a", "!="}, {"n'est pas different de", "=="},
+    {"est superieur a", ">"}, {"est inferieur a", "<"}, {"est superieur ou egal a", ">="}, {"est inferieur ou egal a", "<="},
     {">", ">"}, {"<", "<"}, {">=", ">="}, {"<=", "<="}, {"==", "=="}, {"!=", "!="},
+    {"et", "et"}, {"ou", "ou"},
   };
 
-  /* Check for if-then-else pattern at character level */
+  /* Check les paternes graçe aux caractères*/ // Merci à copilote pour la partie en dessous X) 
   if (strncmp(input, "si ", 3) == 0) {
     const char* then_pos = strstr(input, " alors ");
     const char* else_pos = strstr(input, " sinon ");
@@ -1255,7 +1385,7 @@ char* preprocess_infix(const char* input) {
       if (condition) {
         strncpy(condition, input + 3, cond_len);
         condition[cond_len] = '\0';
-
+ 
         /* Start of then branch */
         const char* then_content = then_pos + 6;
         while (*then_content && isspace((unsigned char)*then_content)) then_content++;
@@ -1357,7 +1487,7 @@ char* preprocess_infix(const char* input) {
   if (!normalized) return NULL;
   
   strcpy(normalized, input);
-  /* replace "multiplier par" with "multiplier_par", "diviser par" with "diviser_par" */
+  /* remplace "multiplier par" with "multiplier_par", "diviser par" with "diviser_par" */
   char* search_replace[] = {
     "multiplier par", "multiplier_par",
     "diviser par", "diviser_par",
@@ -1365,6 +1495,14 @@ char* preprocess_infix(const char* input) {
     "est inferieur a", "est_inferieur_a",
     "est superieur ou egal a", "est_superieur_ou_egal_a",
     "est inferieur ou egal a", "est_inferieur_ou_egal_a",
+    "n'est pas egale a", "n_est_pas_egale_a",
+    "n'est pas different de", "n_est_pas_different_de",
+    "sont egale a", "sont_egale_a",
+    "sont egaux a", "sont_egaux_a",
+    "sont différents de", "sont_differents_de",
+    "sont différents", "sont_differents",
+    "est égale", "est_egale",
+    "sont égaux", "sont_egaux",
     "est egale a", "est_egale_a",
     "est different de", "est_different_de",
     NULL, NULL
@@ -1387,7 +1525,7 @@ char* preprocess_infix(const char* input) {
     }
   }
 
-  /* Tokenize for arithmetic infix */
+  /* Zone pour les règles arithmétiques habituelles*/
   char* input_copy = malloc(strlen(normalized) + 1);
   if (!input_copy) { free(normalized); return NULL; }
   strcpy(input_copy, normalized);
@@ -1421,13 +1559,11 @@ char* preprocess_infix(const char* input) {
   }
 
   int is_op = 0;
-  for (size_t m = 0; m < sizeof(op_map)/sizeof(op_map[0]); m++) {
-    /* Replace underscores back to spaces for comparison */
+  for (size_t m = 0; m < sizeof(list_caractere)/sizeof(list_caractere[0]); m++) {
     char op_name[256];
     strcpy(op_name, tokens[1]);
     for (char* p = op_name; *p; p++) if (*p == '_') *p = ' ';
-    
-    if (strcmp(op_map[m].word, op_name) == 0) { is_op = 1; break; }
+    if (strcmp(list_caractere[m].word, op_name) == 0) { is_op = 1; break; }
   }
 
   if (!is_op) {
@@ -1438,48 +1574,63 @@ char* preprocess_infix(const char* input) {
     return out;
   }
 
-  char* left = malloc(strlen(tokens[0]) + 1);
-  strcpy(left, tokens[0]);
+  /* Allocate token copies */
+  char** tok = malloc(sizeof(char*) * tokens_count);
+  for (int i = 0; i < tokens_count; i++) {
+    tok[i] = malloc(strlen(tokens[i]) + 1);
+    strcpy(tok[i], tokens[i]);
+  }
+  int cnt = tokens_count;
 
-  for (int i = 1; i + 1 < tokens_count; i += 2) {
+  /* First pass: process comparisons (higher precedence) */
+  for (int i = 0; i + 2 < cnt; i++) {
     char op_name[256];
-    strcpy(op_name, tokens[i]);
+    strcpy(op_name, tok[i + 1]);
     for (char* p = op_name; *p; p++) if (*p == '_') *p = ' ';
-    
-    const char* op = op_name;
-    const char* op_sym = op;
-    for (size_t m = 0; m < sizeof(op_map)/sizeof(op_map[0]); m++) {
-      if (strcmp(op_map[m].word, op) == 0) { op_sym = op_map[m].symbol; break; }
+
+    if (is_comparison_op(op_name)) {
+      combine_tokens(tok, &cnt, i, get_op_sym(op_name, list_caractere, sizeof(list_caractere)/sizeof(list_caractere[0])));
+      i--; /* Re-check la position précédente pour prendre en compte des espaces*/
     }
-
-    char* right = malloc(strlen(tokens[i+1]) + 1);
-    strcpy(right, tokens[i+1]);
-
-    int size = (int)(strlen(op_sym) + strlen(left) + strlen(right) + 6);
-    char* combined = malloc(size);
-    if (!combined) { free(left); free(right); free(tokens); free(input_copy); free(normalized); return NULL; }
-
-    snprintf(combined, size, "(%s %s %s)", op_sym, left, right);
-
-    free(left);
-    free(right);
-    left = combined;
   }
 
+  /* Second pass: process logical operators (lower precedence) */
+  for (int i = 0; i + 2 < cnt; i++) {
+    char op_name[256];
+    strcpy(op_name, tok[i + 1]);
+    for (char* p = op_name; *p; p++) if (*p == '_') *p = ' ';
+    
+    if (strcmp(op_name, "et") == 0 || strcmp(op_name, "ou") == 0) {
+      combine_tokens(tok, &cnt, i, get_op_sym(op_name, list_caractere, sizeof(list_caractere)/sizeof(list_caractere[0])));
+      i--; /* Re-check la position précédente pour prendre en compte des espaces */
+    }
+  }
+
+  char* result = tok[0];
+  free(tok);
   free(tokens);
   free(input_copy);
   free(normalized);
-  return left;
+  return result;
 }
 
 
+
+
+
+
+
+
+// ---------------------------------------------------------------------------//
+
 int main(int argc, char** argv) {
 
-  puts("Chocolatine Version 0.5");
+  puts("Chocolatine Version 0.7");
   puts("Press Ctrl+c to Exit\n");
   
   /* Création des parsers mpc pour le langage */
   Number = mpc_new("number");
+  Bool   = mpc_new("bool");
   Symbol = mpc_new("symbol");
   String = mpc_new("string");
   Comment = mpc_new("comment");
@@ -1492,15 +1643,16 @@ int main(int argc, char** argv) {
   mpca_lang(MPCA_LANG_DEFAULT,
     "                                                     \
       number   : /-?[0-9]+/ ;                             \
+      bool     : /vrai|faux/ ;                             \
       symbol   : /[a-zA-Z0-9_+\\-*\\/=<>!&\\\\]+/ ;        \
       comment : /;[^\\r\\n]*/ ;                             \
       string  : /\"(\\\\.|[^\"])*\"/ ;                     \
       sexpr    : '(' <expr>* ')' ;                        \
       qexpr    : '{' <expr>* '}' ;                        \
-      expr     : <number> | <symbol> | <string> | <comment> | <sexpr> | <qexpr> ;\
+      expr     : <bool> | <number> | <symbol> | <string> | <comment> | <sexpr> | <qexpr> ;\
       lispy    : /^/ <expr>* /$/ ;                        \
     ",
-    Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
+    Number, Bool, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
   
   /* Environnement global et enregistrement des fonctions natives */
   lenv* e = lenv_new();
@@ -1557,7 +1709,7 @@ int main(int argc, char** argv) {
   /* Nettoyage final (jamais atteint dans le REPL infini sans signal) */
   lenv_del(e);
   
-  mpc_cleanup(8, Number, Symbol, Comment, String, Sexpr, Qexpr, Expr, Lispy);
+  mpc_cleanup(9, Number, Bool, Symbol, Comment, String, Sexpr, Qexpr, Expr, Lispy);
   
   return 0;
 }
