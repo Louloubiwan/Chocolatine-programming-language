@@ -1,1 +1,9 @@
-si espece ou compte superieur ou egale a 40 alors print "paiement validée"
+espece = 20
+compte = 15
+
++ 2 3
+si espece et compte sont superieur ou egale a 40 alors afficher "paiement reussie" sinon "paiement refusee"
+
+2 + 41
+
+afficher "fin du programme"
