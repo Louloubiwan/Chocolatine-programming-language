@@ -1,6 +1,7 @@
 /*
  * Chocolatine - projet commencé en Aout 2025
    Merci à OrangeDuck pour les libarary mpc
+   
  */
 
 #include "mpc.h"
@@ -43,7 +44,7 @@ struct lenv;
 typedef struct lval lval;
 typedef struct lenv lenv;
 
-/* Fonction principale : initialise le parser, l'environnement, lance la boucle REPL */
+/* Fonction principale : initialise le parser, l'environnement */
 /* Parsers globaux pour l'analyse */
 static mpc_parser_t* Number;
 static mpc_parser_t* Bool;
@@ -53,7 +54,8 @@ static mpc_parser_t* Comment;
 static mpc_parser_t* Sexpr;
 static mpc_parser_t* Qexpr;
 static mpc_parser_t* Expr;
-static mpc_parser_t* Lispy;  /* Global (non-static) so builtin_load can access it */
+static mpc_parser_t* Lispy;
+static mpc_parser_t* Call;
 
 
 /* Type de fonction builtin : prend l'environnement et une liste d'arguments */
@@ -555,9 +557,6 @@ lval* lenv_get(lenv* e, lval* k) {
   } else {
     return lval_err("Unbound Symbol '%s'", k->sym);
   }
-
-  /* Si aucun symbole trouvé, renvoie une erreur */
-  return lval_err("Unbound Symbol '%s'", k->sym);
 }
 
 /* Insère ou remplace une valeur pour une clé donnée.
@@ -589,6 +588,18 @@ void lenv_put(lenv* e, lval* k, lval* v) {
 
 // ---------------------------------------------------------------------------//
 // FIN DES DÉFINITIONS DE LENV ET LVAL (FONCTIONS COEUR) //
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -662,7 +673,44 @@ lval* lval_eval(lenv* e, lval* v) {
 
 // Définit des variables dans l'environnement global
 lval* builtin_def(lenv* e, lval* a) {
-  return builtin_var(e, a, "fonction");
+  LASSERT_TYPE("fonction", a, 0, LVAL_QEXPR);
+
+  lval* syms = a->cell[0];
+
+  // Cas 1 : Définition de variable (ancien comportement)
+  if (syms->count == 1 && a->count == 2) {
+    // Ex: fonction {x} 10 → variable
+    lenv_def(e, syms->cell[0], a->cell[1]);
+    lval_del(a);
+    return lval_sexpr();
+  }
+
+  // Cas 2 : Définition de fonction (nouveau comportement)
+  if (syms->count == 1 && a->count == 3) {
+    LASSERT_TYPE("fonction", a, 1, LVAL_QEXPR);  // paramètres
+    LASSERT_TYPE("fonction", a, 2, LVAL_QEXPR);  // corps
+
+    // Vérifier que le nom est un symbole
+    LASSERT(a, syms->cell[0]->type == LVAL_SYM,
+      "Function name must be a symbol. Got %s", ltype_name(syms->cell[0]->type));
+
+    // Créer la fonction
+    lval* formals = lval_copy(a->cell[1]);
+    lval* body = lval_copy(a->cell[2]);
+    lval* func = lval_lambda(formals, body);
+
+    // Stocker dans l'environnement global
+    lenv_def(e, syms->cell[0], func);
+
+    // Nettoyer
+    lval_del(a);
+    lval_del(func);
+    return lval_sexpr();
+  }
+
+  // Cas 3 : Erreur — nombre d'arguments incorrect
+  LASSERT(a, 0, "fonction expects 1 or 2 arguments for variable, or 3 for function. Got %i.", a->count);
+  return lval_err("Invalid syntax for fonction");
 }
 
 // Définit des variables dans l'environnement local
@@ -674,18 +722,6 @@ lval* builtin_put(lenv* e, lval* a) {
 lval* builtin_list(lenv* e, lval* a) {
   a->type = LVAL_QEXPR;
   return a;
-}
-
-/* head : retourne une Q-expression contenant uniquement le premier élément */
-lval* builtin_head(lenv* e, lval* a) {
-  LASSERT_NUM("head", a, 1);
-  LASSERT_TYPE("head", a, 0, LVAL_QEXPR);
-  LASSERT_NOT_EMPTY("head", a, 0);
-  
-  /* Prend et retourne le premier élément d'une Q-expression */
-  lval* v = lval_take(a, 0);  
-  while (v->count > 1) { lval_del(lval_pop(v, 1)); }
-  return v;
 }
 
 
@@ -762,51 +798,38 @@ lval* builtin_load(lenv* e, lval* a) {
   char linebuf[8192];
   lval* resultat_evaluee = NULL;
 
+
   while (fgets(linebuf, sizeof(linebuf), f) != NULL) {
     // Supprime les caractères de nouvelle ligne, on prends les ligne vide et remplace avec \0 pour NULL
     size_t len = strcspn(linebuf, "\r\n");
-    linebuf[len] = '\0';
+    linebuf[len] = '\0'; 
+   
 
     // Skip les lignes vides
-    char* p = linebuf;
+    char* p = linebuf; // pointe sur le début de la ligne
     while (*p && isspace((unsigned char)*p)) p++;
     if (*p == '\0') { continue; }
 
-    // On verifie si il n'ya pas d'opérateur car sinon risque de non évaluer (+ 2 3 non évalué alors que 2 + 3 est évalué) */
-    char* pre = NULL;
-    if (*p == '+' || *p == '-' || *p == '*' || *p == '/') {
-      pre = malloc(len + 3);
-      if (pre) {
-        snprintf(pre, len + 3, "(%s)", linebuf);
-      }
-    } else {
-      pre = preprocess_infix(linebuf);
-    }
-    if (!pre) { continue; }
 
+    char* preprocessed = preprocess_infix(linebuf);
+    
     mpc_result_t r;
-    if (mpc_parse("<file>", pre, Lispy, &r)) {
-      lval* expr = lval_read(r.output);
-      mpc_ast_delete(r.output);
-
-      // Evalue chaque expression de la ligne puis le stock dans resultat_evaluee
-      while (expr->count) {
-        if (resultat_evaluee) lval_del(resultat_evaluee);
-        resultat_evaluee = lval_eval(e, lval_pop(expr, 0));
-        if (!(resultat_evaluee->type == LVAL_SEXPR && resultat_evaluee->count == 0)) {
-          lval_println(resultat_evaluee);
-        }
-      }
+    if (mpc_parse("<file>", preprocessed, Lispy, &r)) {
+      lval* expr = lval_eval(e, lval_read(r.output));
       
+      lval_println(expr);
       lval_del(expr);
-      free(pre);
+      mpc_ast_delete(r.output);
+      
+
+      free(preprocessed);
     } else {
       // clean
       char* err_msg = mpc_err_string(r.error);
       mpc_err_delete(r.error);
       lval* err = lval_err("n'a pas pu charger le fichier %s", err_msg);
       free(err_msg);
-      free(pre);
+      free(preprocessed);
       lval_del(a);
       fclose(f);
       return err;
@@ -819,7 +842,6 @@ lval* builtin_load(lenv* e, lval* a) {
   /* If nothing evaluated return empty sexpr, else return resultat_evaluee result */
   if (!resultat_evaluee) return lval_sexpr();
   return resultat_evaluee;
-  
 }
 // Comparaison d'égalité
 
@@ -946,7 +968,7 @@ lval* builtin_if(lenv* e, lval* a) {
 
   lval* result = lval_eval(e, lval_pop(a, is_true ? 1 : 2));
   lval_del(a);
-  return result;
+  return result;  
 }
 
 
@@ -998,7 +1020,7 @@ void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
   lval_del(k); lval_del(v);
 }
 
- lval* lval_call(lenv* e, lval* f, lval* a) {
+lval* lval_call(lenv* e, lval* f, lval* a) {
 
   /* If Builtin then simply apply that */
   if (f->builtin) { return f->builtin(e, a); }
@@ -1006,10 +1028,15 @@ void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
   /* Record Argument Counts */
   int given = a->count;
   int total = f->formals->count;
-  (void)given; (void)total;
-  
+
   /* While arguments still remain to be processed */
   while (a->count) {
+
+    /* If we've run out of formal arguments to bind */
+    if (f->formals->count == 0) {
+      lval_del(a);
+      return lval_err("Function passed too many arguments. Got %i, Expected %i.", given, total);
+    }
 
     /* Pop the first symbol from the formals */
     lval* sym = lval_pop(f->formals, 0);
@@ -1017,49 +1044,11 @@ void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
     /* Pop the next argument from the list */
     lval* val = lval_pop(a, 0);
 
-    
-      /* Special Case to deal with '&' */
-    if (strcmp(sym->sym, "&") == 0) {
-
-      /* Ensure '&' is followed by another symbol */
-      if (f->formals->count != 1) {
-        lval_del(a);
-        return lval_err("Function format invalid. "
-          "Symbol '&' not followed by single symbol.");
-      }
-
-      /* Next formal should be bound to remaining arguments */
-    lval* nsym = lval_pop(f->formals, 0);
-    lenv_put(f->env, nsym, builtin_list(e, a));
-    lval_del(sym); lval_del(nsym);
-    break;
-  }
-
-    /* If '&' remains in formal list bind to empty list */
-    if (f->formals->count > 0 &&
-      strcmp(f->formals->cell[0]->sym, "&") == 0) {
-
-      /* Check to ensure that & is not passed invalidly. */
-      if (f->formals->count != 2) {
-        return lval_err("Function format invalid. "
-          "Symbol '&' not followed by single symbol.");
-      }
-
-      /* Pop and delete '&' symbol */
-      lval_del(lval_pop(f->formals, 0));
-
-      /* Next formal should be bound to remaining arguments */
-      lval* nsym = lval_pop(f->formals, 0);
-      lenv_put(f->env, nsym, builtin_list(e, a));
-      lval_del(sym); lval_del(nsym);
-      break;
-    }
-
     /* Bind a copy into the function's environment */
     lenv_put(f->env, sym, val);
-
-    /* Delete symbol and value */
-    lval_del(sym); lval_del(val);
+    
+    lval_del(sym);
+    lval_del(val);
   }
 
   /* Argument list is now bound so can be cleaned up */
@@ -1072,26 +1061,18 @@ void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
     f->env->par = e;
 
     /* Evaluate and return */
-    return builtin_eval(
-      f->env, lval_add(lval_sexpr(), lval_copy(f->body)));
-  } else {
+    return builtin_eval(f->env, lval_add(lval_sexpr(), lval_copy(f->body)));
+  }
+  else {
     /* Otherwise return partially evaluated function */
     return lval_copy(f);
   }
-
-}
+}   
 
 lval* builtin_var(lenv* e, lval* a, char* func) {
   LASSERT_TYPE(func, a, 0, LVAL_QEXPR);
 
   lval* syms = a->cell[0];
-  for (int i = 0; i < syms->count; i++) {
-    LASSERT(a, (syms->cell[i]->type == LVAL_SYM),
-      "Function '%s' cannot define non-symbol. "
-      "Got %s, Expected %s.", func,
-      ltype_name(syms->cell[i]->type),
-      ltype_name(LVAL_SYM));
-  }
 
   LASSERT(a, (syms->count == a->count-1),
     "Function '%s' passed too many arguments for symbols. "
@@ -1142,7 +1123,6 @@ void lenv_add_builtins(lenv* e) {
   
   /* Fonctions sur les listes */
   lenv_add_builtin(e, "list", builtin_list);
-  lenv_add_builtin(e, "head", builtin_head);
   lenv_add_builtin(e, "eval", builtin_eval);
   lenv_add_builtin(e, "join", builtin_join);
 
@@ -1220,7 +1200,7 @@ lval* lval_read_num(mpc_ast_t* t) {
   char* endptr;
   double x = strtod(t->contents, &endptr);
   if (errno != ERANGE && *endptr == '\0') {
-    return lval_num(x); // `lval_num` doit accepter un `double` (ou `float` si tu préfères)
+    return lval_num(x);
   }
   return lval_err("Invalid Number: %s", t->contents);
 }
@@ -1240,12 +1220,21 @@ lval* lval_read_str(mpc_ast_t* t) {
   return str;
 }
 
-/* Lecture générique d'un noeud AST :
- * - number -> lval_num
- * - symbol -> lval_sym
- * - bool -> lval_bool
- * - sexpr/qexpr -> construire récursivement
- */
+/* Convert call parameters to qexpr - extracts symbols from (x y z) */
+lval* lval_call_to_qexpr(lval* call_sexpr) {
+  lval* params = lval_qexpr();
+  
+  /* The call sexpr should have symbols as children */
+  for (int i = 0; i < call_sexpr->count; i++) {
+    if (call_sexpr->cell[i]->type == LVAL_SYM) {
+      params = lval_add(params, lval_copy(call_sexpr->cell[i]));
+    }
+  }
+  
+  return params;
+}
+
+/* Lecture générique d'un noeud AST */
 lval* lval_read(mpc_ast_t* t) {
   
   if (strstr(t->tag, "number")) { return lval_read_num(t); }
@@ -1258,15 +1247,29 @@ lval* lval_read(mpc_ast_t* t) {
       return lval_err("Invalid boolean value: %s", t->contents);
     }
   }
+  
+  /* Handle call nodes - convert to sexpr */
+  if (strstr(t->tag, "call")) {
+    lval* x = lval_sexpr();
+    for (int i = 0; i < t->children_num; i++) {
+      if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
+      if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
+      if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
+      x = lval_add(x, lval_read(t->children[i]));
+    }
+    return x;
+  }
+
   if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
   if (strstr(t->tag, "string")) { return lval_read_str(t); }
 
   lval* x = NULL;
-  if (strcmp(t->tag, ">") == 0) { x = lval_sexpr(); } 
+  if (strcmp(t->tag, ">") == 0) { x = lval_sexpr(); }
+  if (strcmp(t->tag, "<") == 0) { x = lval_sexpr(); }
   if (strstr(t->tag, "sexpr"))  { x = lval_sexpr(); }
   if (strstr(t->tag, "qexpr"))  { x = lval_qexpr(); }
   
-  /* Parcourt les enfants de l'AST et ignore les délimiteurs */
+  /* Build expression by adding children */
   for (int i = 0; i < t->children_num; i++) {
     if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
     if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
@@ -1277,11 +1280,63 @@ lval* lval_read(mpc_ast_t* t) {
     x = lval_add(x, lval_read(t->children[i]));
   }
   
+  /* POST-PROCESSING: Detect function definition pattern and fix it */
+  if (x && x->type == LVAL_SEXPR && x->count >= 3) {
+    /* Pattern: (fonction {name} (params...) body...) */
+    if (x->cell[0]->type == LVAL_SYM && strcmp(x->cell[0]->sym, "fonction") == 0) {
+      if (x->cell[1]->type == LVAL_QEXPR && x->cell[1]->count == 1) {
+        /* Check if cell[2] is a sexpr from a call (contains symbols) */
+        if (x->cell[2]->type == LVAL_SEXPR) {
+          /* Check if it looks like parameters (all symbols) */
+          int all_symbols = 1;
+          for (int i = 0; i < x->cell[2]->count; i++) {
+            if (x->cell[2]->cell[i]->type != LVAL_SYM) {
+              all_symbols = 0;
+              break;
+            }
+          }
+          
+          /* If all symbols, convert to qexpr and wrap remaining elements in body */
+          if (all_symbols && x->cell[2]->count > 0) {
+            lval* params_qexpr = lval_call_to_qexpr(x->cell[2]);
+            lval_del(x->cell[2]);
+            
+            /* Now wrap all remaining elements (from index 3 onward) into a single qexpr for body */
+            lval* body_qexpr = lval_qexpr();
+            for (int i = 3; i < x->count; i++) {
+              body_qexpr = lval_add(body_qexpr, x->cell[i]);
+            }
+            
+            /* Rebuild x with: fonction, {name}, {params}, {body} */
+            lval* new_x = lval_sexpr();
+            new_x = lval_add(new_x, x->cell[0]);  // fonction
+            new_x = lval_add(new_x, x->cell[1]);  // {name}
+            new_x = lval_add(new_x, params_qexpr); // {params}
+            new_x = lval_add(new_x, body_qexpr);   // {body}
+            
+            /* Free old cells array but not the cells we're reusing */
+            free(x->cell);
+            free(x);
+            
+            return new_x;
+          }
+        }
+      }
+    }
+  }
+  
   return x;
 }
 
 // ---------------------------------------------------------------------------//
 // FIN DES FONCTIONS BUILTIN //
+
+
+
+
+
+
+
 
 
 
@@ -1301,18 +1356,6 @@ typedef struct {
 } entree_op;
 
 
-static const char* get_op_sym(const char* name, entree_op *op_map, size_t size) {
-  for (size_t m = 0; m < size; m++) {
-    if (strcmp(op_map[m].word, name) == 0) return op_map[m].symbol; // Si trouvé, retourne le symbole (!=, ==, +, blabla)
-  }
-  return name;
-}
-
-
-static int is_comparison_op(const char* name) { 
-  return strcmp(name, "et") != 0 && strcmp(name, "ou") != 0;
-}
-
 static void combine_tokens(char** tok, int* cnt, int idx, const char* op_sym) {
   int size = strlen(op_sym) + strlen(tok[idx]) + strlen(tok[idx+2]) + 6;
   char* combined = malloc(size);
@@ -1323,19 +1366,78 @@ static void combine_tokens(char** tok, int* cnt, int idx, const char* op_sym) {
   *cnt -= 2;
 }
 
+static const char* get_op_sym(const char* name, entree_op *op_map, size_t size) {
+  for (size_t m = 0; m < size; m++) {
+    if (strcmp(op_map[m].word, name) == 0) return op_map[m].symbol; // Si trouvé, retourne le symbole (!=, ==, +, blabla)
+  }
+  return name;
+}
+
+static int is_comparison_op(const char* name) { 
+  return strcmp(name, "et") != 0 && strcmp(name, "ou") != 0;
+}
+
 
 /* prétraitement : conversion d'une expression infixée simple en notation préfixée Lisp */
 char* preprocess_infix(const char* input) {
-  /* Insert spaces around operators */
-  
-  /*
-   * Converti :
-   * 1. Les expressions d'assignation : money = 10 -> (= {money} 10)
-   * 2. Les expressions infix arithmétiques : x + y -> (+ x y)
-   * 3. Les expressions if-then-else : if cond then expr else expr
-   */
 
-  /* check en cas de patern suivant : variable = value */
+  if (strncmp(input, "fonction ", 9) == 0) {
+    // Pattern: fonction {name} (params) body
+    // or: fonction {name}(params) body
+    const char* after_fonction = input + 9;
+    while (*after_fonction && isspace(*after_fonction)) after_fonction++;
+    
+    if (*after_fonction == '{') {
+      const char* name_end = strchr(after_fonction, '}');
+      if (name_end) {
+        // Extract name with braces
+        int name_len = name_end - after_fonction + 1;
+        char* name = malloc(name_len + 1);
+        strncpy(name, after_fonction, name_len);
+        name[name_len] = '\0';
+        
+        // Look for opening parent
+        const char* params_start = strchr(name_end, '(');
+        if (params_start) {
+          const char* params_end = strchr(params_start, ')');
+          if (params_end) {
+            // Extract params
+            int params_len = params_end - params_start + 1;
+            char* params = malloc(params_len + 1);
+            strncpy(params, params_start, params_len);
+            params[params_len] = '\0';
+            
+            // Get body
+            const char* body_start = params_end + 1;
+            while (*body_start && isspace(*body_start)) body_start++;
+            
+            // Preprocess the body
+            char* proc_body = preprocess_infix(body_start);
+            
+            // Build result: fonction {name} {params as symbols} {preprocessed body}
+            // Convert (x y) to {x y}
+            char* params_as_qexpr = malloc(params_len + 2);
+            params_as_qexpr[0] = '{';
+            strncpy(params_as_qexpr + 1, params_start + 1, params_len - 2);
+            params_as_qexpr[params_len - 1] = '}';
+            params_as_qexpr[params_len] = '\0';
+            
+            char* result = malloc(strlen(name) + strlen(params_as_qexpr) + strlen(proc_body) + 32);
+            snprintf(result, strlen(name) + strlen(params_as_qexpr) + strlen(proc_body) + 32,
+                     "fonction %s %s {%s}", name, params_as_qexpr, proc_body);
+            
+            free(name);
+            free(params);
+            free(params_as_qexpr);
+            free(proc_body);
+            return result;
+          }
+        }
+      }
+    }
+  }
+  
+  /* Insert spaces around operators */
   {
     char* input_copy = malloc(strlen(input) + 1);
     if (input_copy) {
@@ -1345,11 +1447,10 @@ char* preprocess_infix(const char* input) {
       char* second = strtok_r(NULL, " ", &saveptr);
       
       if (first && second && strcmp(second, "=") == 0) {
-        /* Valid assignment: identifier = expr */
-        const char* rest = input + strlen(first) + 1; /* skip first token and space */
-        while (*rest && isspace((unsigned char)*rest)) rest++; /* skip spaces */
-        rest = rest + 1; /* skip the '=' */
-        while (*rest && isspace((unsigned char)*rest)) rest++; /* skip spaces after = */
+        const char* rest = input + strlen(first) + 1;
+        while (*rest && isspace((unsigned char)*rest)) rest++;
+        rest = rest + 1;
+        while (*rest && isspace((unsigned char)*rest)) rest++;
         
         char* result = malloc(strlen(first) + strlen(rest) + 32);
         if (result) {
@@ -1386,6 +1487,38 @@ char* preprocess_infix(const char* input) {
     {"et", "et"}, {"avec", "et"}, {"et aussi", "et"},
     {"ou", "ou"},
   };
+
+    // Ex: add(10 20) → (add 10 20)
+  char* call_start = strchr(input, '(');
+  if (call_start && call_start > input) {
+    char* func_name = malloc(call_start - input + 1);
+    strncpy(func_name, input, call_start - input);
+    func_name[call_start - input] = '\0';
+
+    const char* args_start = call_start + 1;
+    const char* args_end = strchr(args_start, ')');
+    if (!args_end) {
+      free(func_name);
+      return strdup(input);
+    }
+
+    int args_len = args_end - args_start;
+    char* args = malloc(args_len + 1);
+    strncpy(args, args_start, args_len);
+    args[args_len] = '\0';
+
+    char* p = args;
+    while (*p && isspace((unsigned char)*p)) p++;
+    char* end = p + strlen(p) - 1;
+    while (end > p && isspace((unsigned char)*end)) *end-- = '\0';
+
+    char* result = malloc(strlen(func_name) + strlen(args) + 16);
+    snprintf(result, strlen(func_name) + strlen(args) + 16, "(%s %s)", func_name, args);
+
+    free(func_name);
+    free(args);
+    return result;
+  }
 
   /* Check les paternes graçe aux caractères*/ // Merci à copilote pour la partie en dessous X) 
   if (strncmp(input, "si ", 3) == 0) {
@@ -1501,7 +1634,6 @@ char* preprocess_infix(const char* input) {
   if (!normalized) return NULL;
   
   strcpy(normalized, input);
-  /* remplace "multiplier par" with "multiplier_par", "diviser par" with "diviser_par" */
   char* search_replace[] = {
     "multiplier par", "multiplier_par",
     "diviser par", "diviser_par",
@@ -1548,8 +1680,6 @@ char* preprocess_infix(const char* input) {
         memcpy(pos, search_replace[i+1], replace_len);
         pos += replace_len;
       } else {
-        /* If lengths differ, we'd need memmove - simpler to just mark it differently */
-        /* For now, underscore has same length as space so it works */
         pos[search_len/2] = '_';
         pos += search_len;
       }
@@ -1641,7 +1771,7 @@ char* preprocess_infix(const char* input) {
 
 int main(int argc, char** argv) {
 
-  puts("Chocolatine Version 0.7");
+  puts("Chocolatine Version 0.8");
   puts("Press Ctrl+c to Exit\n");
   
   /* Création des parsers mpc pour le langage */
@@ -1654,6 +1784,7 @@ int main(int argc, char** argv) {
   Qexpr  = mpc_new("qexpr");
   Expr   = mpc_new("expr");
   Lispy  = mpc_new("lispy");
+  Call = mpc_new("call");
   
   /* Définition de la grammaire en une seule chaîne (operator supprimé) */
   mpca_lang(MPCA_LANG_DEFAULT,
@@ -1665,14 +1796,25 @@ int main(int argc, char** argv) {
       string  :  /\"[^\"]*\"|'[^']*'/ ;                     \
       sexpr    : '(' <expr>* ')' ;                        \
       qexpr    : '{' <expr>* '}' ;                        \
-      expr     : <bool> | <number> | <symbol>  | <string> | <comment> | <sexpr> | <qexpr> ;\
+      expr     : <bool> | <number> | <symbol>  | <string> | <comment> | <sexpr> | <qexpr> | <call> ;\
       lispy    : /^/ <expr>* /$/ ;                        \
+      call : <symbol> '(' <expr>* ')' ; \
     ",
-    Number, Bool, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
+    Number, Bool, Symbol, String, Comment, Sexpr, Qexpr, Call, Expr, Lispy);
   
   /* Environnement global et enregistrement des fonctions natives */
   lenv* e = lenv_new();
   lenv_add_builtins(e);
+  
+  /* Chargement des fichiers */
+  if (argc >= 2) {
+    for (int i = 1; i < argc; i++) {
+      lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
+      lval* x = builtin_load(e, args);
+      if (x->type == LVAL_ERR) { lval_println(x); }
+      lval_del(x);
+    }
+  }
   
   /* Boucle REPL : lire, prétraiter infix, évaluer, afficher */
   while (1) {
@@ -1686,23 +1828,6 @@ int main(int argc, char** argv) {
     
     mpc_result_t r;
 
-      /* Chargement des fichiers */
-    if (argc >= 2) {
-
-      /* loop over each supplied filename (starting from 1) */
-      for (int i = 1; i < argc; i++) {
-
-        /* Argument list with a single argument, the filename */
-        lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
-
-        /* passer dans le builtin_load pour l'avaluer */
-        lval* x = builtin_load(e, args);
-
-        /* Si une erreur est arrivé pendant l'évaluation alors l'afficher */
-        if (x->type == LVAL_ERR) { lval_println(x); }
-        lval_del(x);
-      }
-    }
     if (mpc_parse("<stdin>", preprocessed, Lispy, &r)) {
       /* Lire l'AST, évaluer avec l'environnement, afficher et libérer */
       lval* x = lval_eval(e, lval_read(r.output));
@@ -1725,7 +1850,7 @@ int main(int argc, char** argv) {
   /* Nettoyage final (jamais atteint dans le REPL infini sans signal) */
   lenv_del(e);
   
-  mpc_cleanup(9, Number, Bool, Symbol, Comment, String, Sexpr, Qexpr, Expr, Lispy);
+  mpc_cleanup(10, Number, Bool, Symbol, Comment, String, Sexpr, Qexpr, Call, Expr, Lispy);
   
   return 0;
 }

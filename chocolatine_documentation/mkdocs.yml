@@ -1,0 +1,40 @@
+site_name: Chocolatine Documentation
+site_description: Documentation for the Chocolatine project
+repo_url: https://github.com/Louloubiwan/Chocolatine
+
+
+theme:  
+  name: material
+  favicon: assets/chocolatine_logo_small.png
+  logo: assets/chocolatine_logo_small.png
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: blue
+  user_color_mode_toggle: true
+  color_mode: dark
+  features: navigation.tabs.sticky
+  icons:
+    - repo: fontawesome/brands/github
+
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Louloubiwan/Chocolatine
+    - icon: fontawesome/brands/discord
+      link:  https://discord.com/invite/4xXHPc8JZY
+ 
+extra_css:
+  - assets/theme.css
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+
+nav: 
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - Documentation: documentation.md
+  - About: about.md
