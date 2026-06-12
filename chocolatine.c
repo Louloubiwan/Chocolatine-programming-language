@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+
 
 
 
@@ -28,24 +30,26 @@ char* readline(char* prompt) {
   return cpy;
 }
 
-/* add_history n'existe pas sur cette plateforme, stub */
-void add_history(char* unused) {}
+void add_history(char* unused) {
+    // du vide
+}
 
 #else
-#include <editline/readline.h>
-#include <editline/history.h>
-#endif
-#include <stdbool.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-/* Déclarations anticipées */
+
+#endif
+
+// Déclarations anticipées */
 
 struct lval;
 struct lenv;
 typedef struct lval lval;
 typedef struct lenv lenv;
 
-/* Fonction principale : initialise le parser, l'environnement */
-/* Parsers globaux pour l'analyse */
+// Fonction principale : initialise le parser, l'environnement
+// Parsers globaux pour l'analyse
 static mpc_parser_t* Number;
 static mpc_parser_t* Bool;
 static mpc_parser_t* Symbol;
@@ -58,19 +62,19 @@ static mpc_parser_t* Lispy;
 static mpc_parser_t* Call;
 
 
-/* Type de fonction builtin : prend l'environnement et une liste d'arguments */
+// Type de fonction builtin : prend l'environnement et une liste d'arguments
 typedef lval*(*lbuiltin)(lenv*, lval*);
 
-/* Énumération des types de valeurs Lisp */
+// Énumération des types de valeurs Lisp
 enum {  
-  LVAL_ERR,    /* Erreur */
-  LVAL_NUM,    /* Nombre */
-  LVAL_SYM,    /* Symbole */
-  LVAL_FUN,    /* Fonction */
-  LVAL_STR,    /* Chaîne de caractères */
-  LVAL_BOOL,   /* Booléen */
-  LVAL_SEXPR,  /* S-expression (evaluated list) */
-  LVAL_QEXPR   /* Q-expression (quoted list) */
+  LVAL_ERR,    // Erreur 
+  LVAL_NUM,    // Nombre 
+  LVAL_SYM,    // Symbole 
+  LVAL_FUN,    // Fonction 
+  LVAL_STR,    // Chaîne de caractères 
+  LVAL_BOOL,   // Booléen 
+  LVAL_SEXPR,  // S-expression (evaluated list)
+  LVAL_QEXPR   // Q-expression (quoted list) 
 };
 
 /* ===== DÉFINITION COMPLÈTE DE STRUCT LENV (avant lval) ===== */
@@ -682,7 +686,7 @@ lval* builtin_def(lenv* e, lval* a) {
     // Ex: fonction {x} 10 → variable
     lenv_def(e, syms->cell[0], a->cell[1]);
     lval_del(a);
-    return lval_sexpr();
+    return lval_str(" ");
   }
 
   // Cas 2 : Définition de fonction (nouveau comportement)
@@ -705,7 +709,7 @@ lval* builtin_def(lenv* e, lval* a) {
     // Nettoyer
     lval_del(a);
     lval_del(func);
-    return lval_sexpr();
+    return lval_str(" ");
   }
 
   // Cas 3 : Erreur — nombre d'arguments incorrect
@@ -761,10 +765,10 @@ lval* builtin_error(lenv* e, lval* a) {
   LASSERT_NUM("error", a, 1);
   LASSERT_TYPE("error", a, 0, LVAL_STR);
 
-  /* Construct Error from first argument */
+  // trouve l'erreur et apparatient au string
   lval* err = lval_err(a->cell[0]->str);
 
-  /* Delete arguments and return */
+  // return l'error
   lval_del(a);
   return err;
 }
@@ -775,11 +779,11 @@ lval* builtin_print(lenv* e, lval* a) {
     lval_print(a->cell[i]);
   }
 
-  /* Print a newline and delete arguments */
+  // nouvelle ligne
   putchar('\n');
   lval_del(a);
 
-  return lval_sexpr();
+  return lval_str(" ");
 }
 
 lval* builtin_load(lenv* e, lval* a) {
@@ -794,7 +798,7 @@ lval* builtin_load(lenv* e, lval* a) {
     return err;
   }
   
-  /* Évaluer fichier ligne par ligne */
+  // Évaluer fichier ligne par ligne
   char linebuf[8192];
   lval* resultat_evaluee = NULL;
 
@@ -839,11 +843,11 @@ lval* builtin_load(lenv* e, lval* a) {
   fclose(f);
   lval_del(a);
 
-  /* If nothing evaluated return empty sexpr, else return resultat_evaluee result */
-  if (!resultat_evaluee) return lval_sexpr();
+  // si rien est evalué alors retourné un string vide
+  if (!resultat_evaluee) return lval_str(" ");
   return resultat_evaluee;
 }
-// Comparaison d'égalité
+// Comparaison d'égalités
 
 lval* builtin_ord(lenv* e, lval* a, char* op) {
   LASSERT_NUM(op, a, 2);
@@ -892,7 +896,7 @@ lval* builtin_le(lenv* e, lval* a) {
   return builtin_ord(e, a, "<=");
 }
 
-/* Helper: check if a value is truthy (non-zero number or true boolean) */
+// check si la valeur n'est pas bool
 static int is_truthy(lval* v) {
   if (v->type == LVAL_NUM) return v->num != 0;
   if (v->type == LVAL_BOOL) return *(v->bools);
@@ -901,7 +905,7 @@ static int is_truthy(lval* v) {
   return 0;
 }
 
-/* Logical AND: returns true si tous les arguments sont vrais */
+// Logical AND: returns true si tous les arguments sont vrais
 lval* builtin_and(lenv* e, lval* a) {
   for (int i = 0; i < a->count; i++) {
     if (a->cell[i]->type != LVAL_NUM && a->cell[i]->type != LVAL_BOOL) {
@@ -916,7 +920,7 @@ lval* builtin_and(lenv* e, lval* a) {
   return lval_bool(1);
 }
 
-/* Logical ou: returns si un argument est vrais*/
+// Logical ou: returns si un argument est vrais
 lval* builtin_or(lenv* e, lval* a) {
   for (int i = 0; i < a->count; i++) {
     if (a->cell[i]->type != LVAL_NUM && a->cell[i]->type != LVAL_BOOL) {
@@ -930,6 +934,114 @@ lval* builtin_or(lenv* e, lval* a) {
   lval_del(a);
   return lval_bool(0);
 }
+
+// boucle while 
+
+lval* builtin_while(lenv* e, lval* a) {
+
+  // syntax  : tant que {condition} alors {consequence}
+  LASSERT_NUM("tant_que", a, 2);
+  LASSERT_TYPE("tant_que", a, 0, LVAL_QEXPR); // condition
+  LASSERT_TYPE("tant_que", a, 1, LVAL_QEXPR); // consequence
+
+  lval* result = lval_str(" ");
+
+  /* Évalue la condition : copie la qexpr, la convertit en sexpr, évalue */
+  lval* cond_copy = lval_copy(a->cell[0]);
+  cond_copy->type = LVAL_SEXPR;
+  lval* cond = lval_eval(e, cond_copy);
+
+  if (cond->type == LVAL_ERR) {
+  lval_del(result);
+  lval_del(a);
+  return cond;
+  }
+
+  while (1) {
+
+    /* Vérifie que le résultat est NUM ou BOOL */
+    if (cond->type != LVAL_NUM && cond->type != LVAL_BOOL) {
+      lval_del(cond);
+      lval_del(result);
+      lval_del(a);
+      return lval_err("tant_que: condition doit être un nombre ou booléen, got %s",
+                      ltype_name(cond->type));
+    }
+
+    if (!is_truthy(cond)) {
+      lval_del(cond);
+      break;
+    }
+    
+    /* Évalue le corps */
+    lval* body_copy = lval_copy(a->cell[1]);
+    body_copy->type = LVAL_SEXPR;
+    lval_del(result);
+    result = lval_eval(e, body_copy);
+
+    if (result->type == LVAL_ERR) { break; }
+  }
+
+  lval_del(a);
+  return result;
+}
+
+
+// boucle for
+
+  // Syntaxe : (pour {i} {0 10} {corps})
+lval* builtin_for(lenv* e, lval* a) {
+  LASSERT_NUM("pour", a, 3);
+  LASSERT_TYPE("pour", a, 0, LVAL_QEXPR);
+  LASSERT_TYPE("pour", a, 1, LVAL_QEXPR);
+  LASSERT_TYPE("pour", a, 2, LVAL_QEXPR);
+
+  /* Variable */
+  LASSERT(a, a->cell[0]->count == 1 && a->cell[0]->cell[0]->type == LVAL_SYM,
+    "pour: la variable doit être un symbole unique");
+  char* var_name = a->cell[0]->cell[0]->sym;
+
+  /* Évalue début et fin (supporte variables et nombres) */
+  LASSERT(a, a->cell[1]->count == 2,
+    "pour: la plage doit avoir 2 éléments");
+
+  lval* start_val = lval_eval(e, lval_copy(a->cell[1]->cell[0]));
+  lval* end_val   = lval_eval(e, lval_copy(a->cell[1]->cell[1]));
+
+  LASSERT(a, start_val->type == LVAL_NUM,
+    "pour: début doit être un nombre, got %s", ltype_name(start_val->type));
+  LASSERT(a, end_val->type == LVAL_NUM,
+    "pour: fin doit être un nombre, got %s", ltype_name(end_val->type));
+
+  int start = (int)start_val->num;
+  int end   = (int)end_val->num;
+  lval_del(start_val);
+  lval_del(end_val);
+
+  lval* body = a->cell[2];
+  lval* result = lval_str(" ");
+
+  for (int i = start; i < end; i++) {
+    /* Définit i dans l'environnement */
+    lval* var_sym = lval_sym(var_name);
+    lval* var_val = lval_num(i);
+    lenv_put(e, var_sym, var_val);
+    lval_del(var_sym);
+    lval_del(var_val);
+
+    /* Évalue le corps */
+    lval* body_copy = lval_copy(body);
+    body_copy->type = LVAL_SEXPR;
+    lval_del(result);
+    result = lval_eval(e, body_copy);
+
+    if (result->type == LVAL_ERR) { break; }
+  }
+
+  lval_del(a);
+  return result;
+}
+
 
 // if : évalue une des deux expressions en fonction d'une condition
 lval* builtin_if(lenv* e, lval* a) {
@@ -1075,7 +1187,7 @@ lval* builtin_var(lenv* e, lval* a, char* func) {
   lval* syms = a->cell[0];
 
   LASSERT(a, (syms->count == a->count-1),
-    "Function '%s' passed too many arguments for symbols. "
+    "La fonction '%s' passed too many arguments for symbols. "
     "Got %i, Expected %i.", func, syms->count, a->count-1);
 
   for (int i = 0; i < syms->count; i++) {
@@ -1084,13 +1196,14 @@ lval* builtin_var(lenv* e, lval* a, char* func) {
       lenv_def(e, syms->cell[i], a->cell[i+1]);
     }
 
-    if (strcmp(func, "=")   == 0) {
+    if (strcmp(func, "=")  == 0) {
       lenv_put(e, syms->cell[i], a->cell[i+1]);
+      printf("La variable '%s' est definie localement.\n", syms->cell[i]->sym);
     }
   }
 
   lval_del(a);
-  return lval_sexpr();
+  return lval_str(" ");
 }
 
 
@@ -1113,12 +1226,18 @@ void lenv_add_builtins(lenv* e) {
   /* Fonctions de gestion de variables */
   lenv_add_builtin(e, "fonction", builtin_def);
   lenv_add_builtin(e, "=",   builtin_put);
+
   lenv_add_builtin(e, "load",  builtin_load);
+  lenv_add_builtin(e, "lire",  builtin_load);
   lenv_add_builtin(e, "charger",  builtin_load);
   lenv_add_builtin(e, "error", builtin_error);
-
+        
   lenv_add_builtin(e, "afficher", builtin_print);
   lenv_add_builtin(e, "Afficher", builtin_print);
+
+  lenv_add_builtin(e, "pour", builtin_for);
+  lenv_add_builtin(e, "tant_que", builtin_while);
+
 
   
   /* Fonctions sur les listes */
@@ -1163,7 +1282,7 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
   }
   
   /* Expression vide -> retourne telle quelle */
-  if (v->count == 0) { return lval_str(""); }  
+  if (v->count == 0) { return lval_str(" "); }  
   /* Expression unique -> retourne l'unique élément */
   if (v->count == 1) { return lval_take(v, 0); }
   
@@ -1378,8 +1497,73 @@ static int is_comparison_op(const char* name) {
 }
 
 
-/* prétraitement : conversion d'une expression infixée simple en notation préfixée Lisp */
+//prétraitement : conversion d'une expression infixée simple en notation préfixée Lisp
 char* preprocess_infix(const char* input) {
+
+
+
+// Normalise tant que à tant_que
+  {
+    char* tmp = malloc(strlen(input) + 1);
+    strcpy(tmp, input);
+    char* pos = tmp;
+    while ((pos = strstr(pos, "tant que")) != NULL) {
+      memcpy(pos, "tant_que ", 8);
+      pos += 8;
+    }
+    
+    if (strcmp(tmp, input) != 0) {
+      char* r = preprocess_infix(tmp);
+      free(tmp);
+      return r;
+    }
+    free(tmp);
+  }
+
+
+  if (strncmp(input, "pour ", 5) == 0) {
+    const char* entre_pos = strstr(input, " entre ");
+    const char* faire_pos = strstr(input, " faire ");
+
+    if (entre_pos != NULL && faire_pos != NULL) {
+      int var_len = entre_pos - (input + 5);
+      char* var_name = malloc(var_len + 1);
+      strncpy(var_name, input + 5, var_len);
+      var_name[var_len] = '\0';
+
+      const char* range_start = entre_pos + 7;
+      int range_len = faire_pos - range_start;
+      char* range = malloc(range_len + 1);
+      strncpy(range, range_start, range_len);
+      range[range_len] = '\0';
+
+      const char* body_content = faire_pos + 7;
+      while (*body_content && isspace((unsigned char)*body_content)) body_content++;
+
+      char* proc_body;
+      if (*body_content == '{') {
+        int blen = strlen(body_content);
+        char* inner = malloc(blen);
+        strncpy(inner, body_content + 1, blen - 2);
+        inner[blen - 2] = '\0';
+        proc_body = preprocess_infix(inner);
+        free(inner);
+      } else {
+        proc_body = preprocess_infix(body_content);
+      }
+
+      char* result = malloc(strlen(var_name) + strlen(range) + strlen(proc_body) + 32);
+      snprintf(result, strlen(var_name) + strlen(range) + strlen(proc_body) + 32,
+               "(pour {%s} {%s} {%s})", var_name, range, proc_body);
+
+      free(var_name);
+      free(range);
+      free(proc_body);
+      return result;
+    }
+  }
+
+
 
   if (strncmp(input, "fonction ", 9) == 0) {
     // Pattern: fonction {name} (params) body
@@ -1437,7 +1621,7 @@ char* preprocess_infix(const char* input) {
     }
   }
   
-  /* Insert spaces around operators */
+  // ajoute les espace entre les opérateur (on passe de =23 à 2 = 3)
   {
     char* input_copy = malloc(strlen(input) + 1);
     if (input_copy) {
@@ -1446,13 +1630,13 @@ char* preprocess_infix(const char* input) {
       char* first = strtok_r(input_copy, " ", &saveptr);
       char* second = strtok_r(NULL, " ", &saveptr);
       
-      if (first && second && strcmp(second, "=") == 0) {
+      if (first && second && (strcmp(second, "=") == 0)) {
         const char* rest = input + strlen(first) + 1;
         while (*rest && isspace((unsigned char)*rest)) rest++;
-        rest = rest + 1;
+        rest = rest + strlen(second);
         while (*rest && isspace((unsigned char)*rest)) rest++;
         
-        char* result = malloc(strlen(first) + strlen(rest) + 32);
+        char* result = malloc(strlen(first) + strlen(rest) + 32);   
         if (result) {
           snprintf(result, strlen(first) + strlen(rest) + 32, "(= {%s} %s)", first, rest);
           free(input_copy);
@@ -1472,20 +1656,20 @@ char* preprocess_infix(const char* input) {
   entree_op list_caractere[] = {
     {"+", "+"}, {"plus", "+"}, {"Plus", "+"},
     {"-", "-"}, {"moin", "-"}, {"moins", "-"}, {"Moins", "-"}, {"soustraire", "-"}, {"soustrair", "-"}, {"Soustraire", "-"},
-    {"*", "*"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"fois", "*"}, {"fois par", "*"},
-    {"/", "/"}, {"diviser", "/"}, {"diviser par", "/"},
+    {"*", "*"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"fois", "*"}, {"fois par", "*"}, {"multiplie par", "*"}, {"multiplie", "*"},
+    {"/", "/"}, {"diviser", "/"}, {"diviser par", "/"}, {"divise", "/"}, {"divise par", "/"}, {"divisee", "/"}, {"divisee par", "/"},  
        
     {">", ">"}, {"est superieur a", ">"}, {"est superieur que", ">"},
     {"<", "<"}, {"est inferieur a", "<"}, {"est inferieur que", "<"},
     {">=", ">="}, {"est superieur ou egal a", ">="}, {"est superieur ou egale a", ">="}, {"sont superieur ou egale a", ">="}, {"sont superieur ou egaux a", ">="},
     {"<=", "<="}, {"est inferieur ou egal a", "<="}, {"est inferieur ou egale a", "<="}, {"sont inferieur ou egale a", "<="}, {"sont inferieur ou egaux a", "<="},
-    {"==", "=="}, {"est", "=="}, {"egale", "=="}, {"est egale a", "=="}, {"est egal", "=="}, {"sont egale a", "=="}, {"sont egaux a", "=="}, {"n est pas different de", "=="}, 
+    {"==", "=="}, {"est", "=="}, {"egale", "=="}, {"egal", "=="}, {"est egale a", "=="}, {"est egal", "=="}, {"sont egale a", "=="}, {"sont egaux a", "=="}, {"n est pas different de", "=="}, 
     
     {"!=", "!="}, {"=!","!="}, {"est different de", "!="}, {"sont differents de", "!="}, {"sont different de", "!="}, {"n est pas", "!="}, {"n est pas egale a", "!="}, {"ne sont pas egaux a", "!="}, 
     {"ne sont pas egale a", "!="}, {"ne sont pas egal a", "!="}, {"ne sont pas egal", "!="}, {"n est pas egales a", "!="}, {"n est pas egal", "!="}, {"n est pas egal a", "!="},
 
     {"et", "et"}, {"avec", "et"}, {"et aussi", "et"},
-    {"ou", "ou"},
+    {"ou", "ou"}, 
   };
 
     // Ex: add(10 20) → (add 10 20)
@@ -1520,7 +1704,44 @@ char* preprocess_infix(const char* input) {
     return result;
   }
 
-  /* Check les paternes graçe aux caractères*/ // Merci à copilote pour la partie en dessous X) 
+  if (strncmp(input, "tant_que ", 9) == 0) {
+    const char* alors_pos = strstr(input, " alors ");
+    if (alors_pos != NULL) {
+      int cond_len = alors_pos - (input + 9);
+      char* condition = malloc(cond_len + 1);
+      strncpy(condition, input + 9, cond_len);
+      condition[cond_len] = '\0';
+
+      const char* body_content = alors_pos + 7;
+      while (*body_content && isspace((unsigned char)*body_content)) body_content++;
+
+      char* proc_cond = preprocess_infix(condition);
+      char* proc_body;
+      if (*body_content == '{') {
+        int blen = strlen(body_content);
+        char* inner = malloc(blen);
+        strncpy(inner, body_content + 1, blen - 2);
+        inner[blen - 2] = '\0';
+        proc_body = preprocess_infix(inner);
+        free(inner);
+      } else {
+        proc_body = preprocess_infix(body_content);
+      }
+
+      char* result = malloc(strlen(proc_cond) + strlen(proc_body) + 32);
+      snprintf(result, strlen(proc_cond) + strlen(proc_body) + 32,
+               "(tant_que {%s} {%s})", proc_cond, proc_body);
+
+      free(condition);
+      free(proc_cond);
+      free(proc_body);
+      return result;
+    }
+  }
+
+
+  // Check les paternes graçe aux caractères*/ 
+  // Merci à copilote pour la partie en dessous X) 
   if (strncmp(input, "si ", 3) == 0) {
     const char* then_pos = strstr(input, " alors ");
     const char* else_pos = strstr(input, " sinon ");
@@ -1533,8 +1754,8 @@ char* preprocess_infix(const char* input) {
         strncpy(condition, input + 3, cond_len);
         condition[cond_len] = '\0';
  
-        /* Start of then branch */
-        const char* then_content = then_pos + 6;
+        // Start of then branch 
+        const char* then_content = then_pos + 7;
         while (*then_content && isspace((unsigned char)*then_content)) then_content++;
         
         char* then_expr = malloc(4096);
@@ -1546,7 +1767,7 @@ char* preprocess_infix(const char* input) {
           
           int then_len = 0;
           
-          /* Extract then branch (handle both {expr} and bare expr) */
+          // Extract then branch (handle both {expr} and bare expr)
           if (*then_content == '{') {
             int brace_count = 1;
             const char* ptr = then_content + 1;
@@ -1560,7 +1781,7 @@ char* preprocess_infix(const char* input) {
             }
             then_expr[then_len] = '\0';
             
-            /* Check for else after the closing brace */
+            // Check for else after the closing brace
             if (else_pos && else_pos >= (ptr - 1)) {
               const char* else_content = else_pos + 6;
               while (*else_content && isspace((unsigned char)*else_content)) else_content++;
@@ -1583,12 +1804,12 @@ char* preprocess_infix(const char* input) {
               }
             }
           } else {
-            /* No braces, scan until 'else' or end */
+            // scan jusqu'à que on trouve le else
             if (else_pos) {
               then_len = else_pos - then_content;
               strncpy(then_expr, then_content, then_len);
               then_expr[then_len] = '\0';
-              /* Trim trailing whitespace */
+              
               while (then_len > 0 && isspace((unsigned char)then_expr[then_len-1])) {
                 then_expr[--then_len] = '\0';
               }
@@ -1597,12 +1818,13 @@ char* preprocess_infix(const char* input) {
               while (*else_content && isspace((unsigned char)*else_content)) else_content++;
               strcpy(else_expr, else_content);
             } else {
-              /* No else, just take rest as then */
+        
               strcpy(then_expr, then_content);
             }
           }
 
-          /* Recursively preprocess parts */
+       
+          // preprocesse 
           char* proc_cond = preprocess_infix(condition);
           char* proc_then = preprocess_infix(then_expr);
           char* proc_else = preprocess_infix(else_expr);
@@ -1629,14 +1851,18 @@ char* preprocess_infix(const char* input) {
     }
   }
 
-  /* Remplacer les terme qui ont des espaces avec des underscore _ */
+  // Remplacer les terme qui ont des espaces avec des underscore _ 
   char* normalized = malloc(strlen(input) * 2 + 1);
   if (!normalized) return NULL;
   
   strcpy(normalized, input);
   char* search_replace[] = {
     "multiplier par", "multiplier_par",
+    "multiplie par", "multiplie_par",
     "diviser par", "diviser_par",
+    "divise par", "divise_par",
+    "divisee par", "divisee_par",
+  
     "est superieur a", "est_superieur_a",
     "est inferieur a", "est_inferieur_a",
 
@@ -1668,6 +1894,8 @@ char* preprocess_infix(const char* input) {
     "sont egaux a", "sont_egaux_a",
     "est egale a", "est_egale_a",
     "est egal", "est_egal",
+    "est egale", "est_egale",
+    "tant que", "tant_que",
     NULL, NULL
   };
   
@@ -1686,7 +1914,8 @@ char* preprocess_infix(const char* input) {
     }
   }
 
-  /* Zone pour les règles arithmétiques habituelles*/
+  // Zone pour les règles arithmétiques habituelle
+
   char* input_copy = malloc(strlen(normalized) + 1);
   if (!input_copy) { free(normalized); return NULL; }
   strcpy(input_copy, normalized);
@@ -1712,7 +1941,7 @@ char* preprocess_infix(const char* input) {
   }
 
   if (tokens_count < 3) {
-    char* out = strdup(input);
+    char* out = strdup(normalized);
     free(tokens);
     free(input_copy);
     free(normalized);
@@ -1727,8 +1956,39 @@ char* preprocess_infix(const char* input) {
     if (strcmp(list_caractere[m].word, op_name) == 0) { is_op = 1; break; }
   }
 
-  if (!is_op) {
-    char* out = strdup(input);
+if (!is_op) {
+    int rest_is_expr = 0;
+    if (tokens_count >= 4) {
+      char op_check[256];
+      strcpy(op_check, tokens[2]);
+      for (char* p = op_check; *p; p++) if (*p == '_') *p = ' ';
+      for (size_t m = 0; m < sizeof(list_caractere)/sizeof(list_caractere[0]); m++) {
+        if (strcmp(list_caractere[m].word, op_check) == 0) { rest_is_expr = 1; break; }
+      }
+    }
+
+    if (rest_is_expr) {
+      size_t rest_len = 0;
+      for (int i = 1; i < tokens_count; i++) rest_len += strlen(tokens[i]) + 1;
+      char* rest = malloc(rest_len + 1);
+      rest[0] = '\0';
+      for (int i = 1; i < tokens_count; i++) {
+        strcat(rest, tokens[i]);
+        if (i < tokens_count - 1) strcat(rest, " ");
+      }
+      char* proc_rest = preprocess_infix(rest);
+      char* result = malloc(strlen(tokens[0]) + strlen(proc_rest) + 4);
+      snprintf(result, strlen(tokens[0]) + strlen(proc_rest) + 4,
+               "(%s %s)", tokens[0], proc_rest);
+      free(rest);
+      free(proc_rest);
+      free(tokens);
+      free(input_copy);
+      free(normalized);
+      return result;
+    }
+
+    char* out = strdup(normalized);
     free(tokens);
     free(input_copy);
     free(normalized);
@@ -1743,7 +2003,6 @@ char* preprocess_infix(const char* input) {
   }
   int cnt = tokens_count;
 
-  /* First pass: process comparisons (higher precedence) */
   for (int i = 0; i + 2 < cnt; i++) {
     char op_name[256];
     strcpy(op_name, tok[i + 1]);
@@ -1751,7 +2010,7 @@ char* preprocess_infix(const char* input) {
 
     if (is_comparison_op(op_name)) {
       combine_tokens(tok, &cnt, i, get_op_sym(op_name, list_caractere, sizeof(list_caractere)/sizeof(list_caractere[0])));
-      i--; /* Re-check la position précédente pour prendre en compte des espaces*/
+      i--;
     }
   }
 
@@ -1764,17 +2023,14 @@ char* preprocess_infix(const char* input) {
 }
 
 
-
-
-
 // ---------------------------------------------------------------------------//
 
 int main(int argc, char** argv) {
 
-  puts("Chocolatine Version 0.8");
-  puts("Press Ctrl+c to Exit\n");
+  puts("Chocolatine Version 0.9");
+  puts("Ctrl+C pour quitter\n");
   
-  /* Création des parsers mpc pour le langage */
+  // Création des parsers mpc pour le langage   
   Number = mpc_new("number");
   Bool   = mpc_new("bool");
   Symbol = mpc_new("symbol");
@@ -1786,7 +2042,7 @@ int main(int argc, char** argv) {
   Lispy  = mpc_new("lispy");
   Call = mpc_new("call");
   
-  /* Définition de la grammaire en une seule chaîne (operator supprimé) */
+  // Définition de la grammaire en une seule chaîne (operator supprimé)
   mpca_lang(MPCA_LANG_DEFAULT,
     "                                                     \
       number   : /-?[0-9]+(\\.[0-9]+)?/ ;                             \
@@ -1802,11 +2058,11 @@ int main(int argc, char** argv) {
     ",
     Number, Bool, Symbol, String, Comment, Sexpr, Qexpr, Call, Expr, Lispy);
   
-  /* Environnement global et enregistrement des fonctions natives */
+  // Environnement global et enregistrement des fonctions natives 
   lenv* e = lenv_new();
   lenv_add_builtins(e);
   
-  /* Chargement des fichiers */
+  // Chargement des fichiers si jamais on utilise builtin_load
   if (argc >= 2) {
     for (int i = 1; i < argc; i++) {
       lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
@@ -1816,7 +2072,7 @@ int main(int argc, char** argv) {
     }
   }
   
-  /* Boucle REPL : lire, prétraiter infix, évaluer, afficher */
+  // Boucle REPL : lire, prétraiter infix, évaluer, afficher 
   while (1) {
   
     char* input = readline("Chocolatine> ");
@@ -1829,7 +2085,7 @@ int main(int argc, char** argv) {
     mpc_result_t r;
 
     if (mpc_parse("<stdin>", preprocessed, Lispy, &r)) {
-      /* Lire l'AST, évaluer avec l'environnement, afficher et libérer */
+      // Lire le résulte puis après on free de la ram
       lval* x = lval_eval(e, lval_read(r.output));
       
       lval_println(x);
@@ -1838,7 +2094,7 @@ int main(int argc, char** argv) {
       mpc_ast_delete(r.output);
       
     } else {    
-      /* Afficher l'erreur de parsing (mpc) et nettoyer */
+      
       mpc_err_print(r.error);
       mpc_err_delete(r.error);
     }
@@ -1847,7 +2103,7 @@ int main(int argc, char** argv) {
     
   }
   
-  /* Nettoyage final (jamais atteint dans le REPL infini sans signal) */
+  // Nettoyage final 
   lenv_del(e);
   
   mpc_cleanup(10, Number, Bool, Symbol, Comment, String, Sexpr, Qexpr, Call, Expr, Lispy);
