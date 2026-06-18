@@ -1659,8 +1659,8 @@ char* preprocess_infix(const char* input) {
     {"*", "*"}, {"multiplier", "*"}, {"multiplier par", "*"}, {"fois", "*"}, {"fois par", "*"}, {"multiplie par", "*"}, {"multiplie", "*"},
     {"/", "/"}, {"diviser", "/"}, {"diviser par", "/"}, {"divise", "/"}, {"divise par", "/"}, {"divisee", "/"}, {"divisee par", "/"},  
        
-    {">", ">"}, {"est superieur a", ">"}, {"est superieur que", ">"},
-    {"<", "<"}, {"est inferieur a", "<"}, {"est inferieur que", "<"},
+    {">", ">"}, {"est superieur a", ">"}, {"est superieur que", ">"}, {"est superieure a", ">"}, {"est superieure que", ">"},
+    {"<", "<"}, {"est inferieur a", "<"}, {"est inferieur que", "<"}, {"est inferieure a", "<"}, {"est inferieure que", "<"},
     {">=", ">="}, {"est superieur ou egal a", ">="}, {"est superieur ou egale a", ">="}, {"sont superieur ou egale a", ">="}, {"sont superieur ou egaux a", ">="},
     {"<=", "<="}, {"est inferieur ou egal a", "<="}, {"est inferieur ou egale a", "<="}, {"sont inferieur ou egale a", "<="}, {"sont inferieur ou egaux a", "<="},
     {"==", "=="}, {"est", "=="}, {"egale", "=="}, {"egal", "=="}, {"est egale a", "=="}, {"est egal", "=="}, {"sont egale a", "=="}, {"sont egaux a", "=="}, {"n est pas different de", "=="}, 
@@ -1864,7 +1864,15 @@ char* preprocess_infix(const char* input) {
     "divisee par", "divisee_par",
   
     "est superieur a", "est_superieur_a",
+    "est superieure a", "est_superieure_a",
+    "est superieur que", "est_superieur_que",
+    "est superieure que", "est_superieure_que",
+
     "est inferieur a", "est_inferieur_a",
+    "est inferieur que", "est_inferieur_que"
+    "est inferieure a", "est_inferieure_a",
+    "est inferieure que", "est_inferieure_que"
+
 
     "sont superieur ou egale a", "sont_superieur_ou_egale_a",
     "sont superieur ou egaux a", "sont_superieur_ou_egaux_a",
@@ -2027,7 +2035,7 @@ if (!is_op) {
 
 int main(int argc, char** argv) {
 
-  puts("Chocolatine Version 0.9");
+  puts("Chocolatine Version 1.1");
   puts("Ctrl+C pour quitter\n");
   
   // Création des parsers mpc pour le langage   
