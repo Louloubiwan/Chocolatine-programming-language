@@ -6,8 +6,35 @@ I created this language to make programming easily understandable in French. It'
 
 I'm open to any contributions—just open a pull request. If you need any help, I'm available on Discord. To start learning Chocolatine, please read the documentation. I made it VERY short (trust me).
 
-⚠️ Documentation: https://louloubiwan.github.io/Chocolatine-documentation/
+
+# HOW TO USE
+
+⚠️ Documentation: https://louloubiwan.github.io/Chocolatine-documentation/   ⚠️
 
 Discord: https://discord.com/invite/4xXHPc8JZY
 
 
+## Building
+
+**Windows building** : 
+
+
+`gcc -std=c99 -Wall chocolatine.c mpc.c -o chocolatine`
+
+**Windows building from Linux (cross-compile)** : 
+
+`x86_64-w64-mingw32-gcc -std=c99 -Wall -Wextra -pedantic chocolatine.c mpc.c -o chocolatine.exe \
+    -lm \
+    -I.
+`
+
+**Linux building** : 
+
+- build-essential : `sudo apt install build-essential`
+
+
+`gcc -std=c99 -Wall -Wextra -pedantic chocolatine.c mpc.c -o chocolatine \
+    -lm -ledit \
+    -D_GNU_SOURCE \
+    -D_DEFAULT_SOURCE \
+    -I.`
